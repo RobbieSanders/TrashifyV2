@@ -107,14 +107,45 @@ export function AdminDashboard({ navigation }: any) {
           orderBy('timestamp', 'desc'),
           limit(100)
         );
-        const logsSnapshot = await getDocs(logsQuery);
-        const logsData = logsSnapshot.docs.map(doc => ({
-          ...doc.data(),
-          id: doc.id
-        } as ActivityLog));
-        setActivityLogs(logsData);
+        
+        // Use onSnapshot with error handler to silently fallback
+        const unsubscribe = onSnapshot(
+          logsQuery, 
+          (snapshot) => {
+            const logsData = snapshot.docs.map(doc => ({
+              ...doc.data(),
+              id: doc.id
+            } as ActivityLog));
+            setActivityLogs(logsData);
+            unsubscribe(); // Unsubscribe after getting data
+          },
+          (error) => {
+            // Silently fallback to simpler query without orderBy if index is missing
+            const fallbackQuery = query(
+              collection(db, 'activityLogs'),
+              limit(100)
+            );
+            
+            getDocs(fallbackQuery).then(snapshot => {
+              const logsData = snapshot.docs.map(doc => ({
+                ...doc.data(),
+                id: doc.id
+              } as ActivityLog));
+              // Sort manually
+              logsData.sort((a, b) => {
+                const aTime = a.timestamp || 0;
+                const bTime = b.timestamp || 0;
+                return bTime - aTime;
+              });
+              setActivityLogs(logsData);
+            }).catch(() => {
+              // Collection doesn't exist yet
+              setActivityLogs([]);
+            });
+          }
+        );
       } catch (error) {
-        console.log('Activity logs collection not found, will be created on first activity');
+        // Collection doesn't exist yet
         setActivityLogs([]);
       }
 

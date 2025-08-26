@@ -21,7 +21,7 @@ interface AuthState {
   
   // Actions
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, firstName: string, lastName: string, role: 'host' | 'worker') => Promise<void>;
+  signUp: (email: string, password: string, firstName: string, lastName: string, role: 'host' | 'worker' | 'cleaner') => Promise<void>;
   signInGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
@@ -52,7 +52,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  signUp: async (email: string, password: string, firstName: string, lastName: string, role: 'host' | 'worker') => {
+  signUp: async (email: string, password: string, firstName: string, lastName: string, role: 'host' | 'worker' | 'cleaner') => {
     set({ loading: true, error: null });
     try {
       console.log('[authStore] Starting sign up with role:', role);

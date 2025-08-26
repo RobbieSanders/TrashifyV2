@@ -25,7 +25,7 @@ export interface UserProfile {
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
-  role: 'host' | 'worker' | 'admin' | 'customer_service' | 'manager_admin' | 'super_admin';
+  role: 'host' | 'worker' | 'cleaner' | 'admin' | 'customer_service' | 'manager_admin' | 'super_admin';
   photoURL?: string | null;
   displayName?: string | null;
   createdAt?: any;
@@ -33,6 +33,18 @@ export interface UserProfile {
   deactivated?: boolean;
   lastActivity?: any;
   activityLog?: ActivityLogEntry[];
+  
+  // Cleaner specific fields
+  cleanerProfile?: {
+    hourlyRate?: number;
+    specialties?: string[];
+    servicesOffered?: string[];
+    availability?: string[];
+    rating?: number;
+    totalCleanings?: number;
+    bio?: string;
+    certifications?: string[];
+  };
 }
 
 export interface ActivityLogEntry {
@@ -182,7 +194,7 @@ export async function signUpWithEmail(
   password: string,
   firstName?: string,
   lastName?: string,
-  role: 'host' | 'worker' = 'host'
+  role: 'host' | 'worker' | 'cleaner' = 'host'
 ): Promise<UserProfile> {
   if (!isFirebaseConfigured || !auth) {
     throw new Error('Firebase not configured');

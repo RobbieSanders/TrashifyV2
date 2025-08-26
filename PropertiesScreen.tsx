@@ -4,10 +4,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAccountsStore } from './src/accountsStore';
 import { useAuthStore } from './src/authStore';
 import { geocodeAddressCrossPlatform, searchAddresses } from './src/geocodingService';
+import { syncPropertyWithICal, syncAllPropertiesWithICal } from './src/icalService';
 
 export default function PropertiesScreen() {
   const user = useAuthStore(s => s.user);
-  const { properties, loadProperties, addNewProperty, removeProperty, setAsMain } = useAccountsStore();
+  const { properties, loadProperties, addNewProperty, updateProperty, removeProperty, setAsMain } = useAccountsStore();
   const [showAddProperty, setShowAddProperty] = useState(false);
   const [showEditProperty, setShowEditProperty] = useState(false);
   const [editingProperty, setEditingProperty] = useState<any>(null);
@@ -16,9 +17,12 @@ export default function PropertiesScreen() {
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [zipCode, setZipCode] = useState('');
+  const [icalUrl, setIcalUrl] = useState('');
   const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncingPropertyId, setSyncingPropertyId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.uid) loadProperties(user.uid);
@@ -71,13 +75,78 @@ export default function PropertiesScreen() {
       };
 
       if (user?.uid) {
-        await addNewProperty(
-          user.uid,
-          geocoded?.fullAddress || fullAddress,
-          coordinates,
-          newLabel.trim() || streetAddress,
-          properties.length === 0
-        );
+        let propertyId: string | undefined;
+        const finalAddress = geocoded?.fullAddress || fullAddress;
+        const finalLabel = newLabel.trim() || streetAddress;
+        const finalIcalUrl = icalUrl.trim() || null;
+        
+        if (showEditProperty && editingProperty) {
+          // Update existing property
+          await updateProperty(
+            user.uid,
+            editingProperty.id,
+            {
+              address: finalAddress,
+              coords: coordinates,
+              label: finalLabel,
+              icalUrl: finalIcalUrl
+            }
+          );
+          propertyId = editingProperty.id;
+        } else {
+          // Add new property
+          const newProp = await addNewProperty(
+            user.uid,
+            finalAddress,
+            coordinates,
+            finalLabel,
+            properties.length === 0,
+            finalIcalUrl || undefined
+          );
+          
+          // Get the ID of the newly created property
+          if (newProp) {
+            propertyId = newProp;
+          }
+        }
+        
+        // If there's an iCal URL, automatically sync it
+        if (finalIcalUrl && propertyId) {
+          console.log('🔄 Auto-syncing iCal for new property:', finalIcalUrl);
+          setIsSyncing(true);
+          try {
+            const jobsCreated = await syncPropertyWithICal(
+              propertyId,
+              finalIcalUrl,
+              finalAddress,
+              user.uid,
+              `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Host',
+              coordinates
+            );
+            
+            if (jobsCreated > 0) {
+              Alert.alert(
+                'Success', 
+                `Property ${showEditProperty ? 'updated' : 'added'} and ${jobsCreated} cleaning job${jobsCreated > 1 ? 's' : ''} created from calendar`
+              );
+            } else {
+              Alert.alert(
+                'Success', 
+                `Property ${showEditProperty ? 'updated' : 'added'}. No upcoming cleanings found in calendar.`
+              );
+            }
+          } catch (error: any) {
+            console.error('Auto-sync error:', error);
+            Alert.alert(
+              'Property Added',
+              'Property saved but calendar sync failed. You can try syncing again later.'
+            );
+          } finally {
+            setIsSyncing(false);
+          }
+        } else {
+          Alert.alert('Success', showEditProperty ? 'Property updated successfully' : 'Property added successfully');
+        }
         
         // Reset form
         setNewLabel('');
@@ -86,7 +155,8 @@ export default function PropertiesScreen() {
         setState('');
         setZipCode('');
         setShowAddProperty(false);
-        Alert.alert('Success', 'Property added successfully');
+        setShowEditProperty(false);
+        setIcalUrl('');
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to add property. Please try again.');
@@ -104,7 +174,68 @@ export default function PropertiesScreen() {
     setCity(parsed.city);
     setState(parsed.state);
     setZipCode(parsed.zip);
+    setIcalUrl(property.icalUrl || '');
     setShowEditProperty(true);
+  };
+
+  // Handle sync with iCal
+  const handleSyncProperty = async (property: any) => {
+    if (!property.icalUrl || !user) {
+      Alert.alert('Error', 'No calendar URL configured for this property');
+      return;
+    }
+
+    setSyncingPropertyId(property.id);
+    setIsSyncing(true);
+
+    try {
+      const jobsCreated = await syncPropertyWithICal(
+        property.id,
+        property.icalUrl,
+        property.address,
+        user.uid,
+        `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Host',
+        {
+          latitude: property.latitude || 0,
+          longitude: property.longitude || 0
+        }
+      );
+
+      if (jobsCreated > 0) {
+        Alert.alert('Success', `Created ${jobsCreated} cleaning job${jobsCreated > 1 ? 's' : ''} from calendar`);
+      } else {
+        Alert.alert('Info', 'No new cleaning jobs to create. All upcoming checkouts already have cleaning scheduled.');
+      }
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      Alert.alert('Sync Failed', error.message || 'Failed to sync calendar. Please check your iCal URL.');
+    } finally {
+      setIsSyncing(false);
+      setSyncingPropertyId(null);
+    }
+  };
+
+  // Handle sync all properties
+  const handleSyncAllProperties = async () => {
+    if (!user) return;
+    
+    const propertiesWithICal = properties.filter(p => p.icalUrl);
+    if (propertiesWithICal.length === 0) {
+      Alert.alert('No Calendars', 'No properties have calendar URLs configured');
+      return;
+    }
+
+    setIsSyncing(true);
+    
+    try {
+      await syncAllPropertiesWithICal(user.uid);
+      Alert.alert('Success', 'All calendars have been synced');
+    } catch (error) {
+      console.error('Sync all error:', error);
+      Alert.alert('Error', 'Failed to sync some calendars');
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const styles: any = {
@@ -279,6 +410,46 @@ export default function PropertiesScreen() {
                 </View>
               ) : null}
 
+              {/* iCal Calendar URL Section */}
+              <View style={{ 
+                marginTop: 20, 
+                paddingTop: 20, 
+                borderTopWidth: 1, 
+                borderTopColor: '#E5E7EB' 
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <Ionicons name="calendar-outline" size={16} color="#1E88E5" style={{ marginRight: 6 }} />
+                  <Text style={[styles.label, { marginBottom: 0 }]}>iCal Calendar URL (Optional)</Text>
+                </View>
+                <Text style={[styles.muted, { fontSize: 11, marginBottom: 8 }]}>
+                  Link your Airbnb or vacation rental calendar to automatically schedule cleanings
+                </Text>
+                <TextInput
+                  style={[styles.input, { fontSize: 14 }]}
+                  value={icalUrl}
+                  onChangeText={setIcalUrl}
+                  placeholder="https://airbnb.com/calendar/ical/..."
+                  keyboardType="url"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {icalUrl !== '' && (
+                  <View style={{ 
+                    backgroundColor: '#E3F2FD', 
+                    padding: 8, 
+                    borderRadius: 6,
+                    marginTop: -8,
+                    flexDirection: 'row',
+                    alignItems: 'center'
+                  }}>
+                    <Ionicons name="checkmark-circle" size={14} color="#1E88E5" style={{ marginRight: 6 }} />
+                    <Text style={{ fontSize: 11, color: '#1E88E5' }}>
+                      Calendar will sync automatically every 4 hours
+                    </Text>
+                  </View>
+                )}
+              </View>
+
               <TouchableOpacity
                 style={[styles.button, { marginTop: 20 }]}
                 onPress={handleSaveProperty}
@@ -297,14 +468,43 @@ export default function PropertiesScreen() {
         <Text style={styles.title}>Manage Properties</Text>
         <Text style={styles.muted}>Add, edit, and manage your property addresses</Text>
 
-        {/* Add Property Button */}
-        <TouchableOpacity
-          style={[styles.button, { marginVertical: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}
-          onPress={() => setShowAddProperty(true)}
-        >
-          <Ionicons name="add-circle-outline" size={20} color="white" style={{ marginRight: 8 }} />
-          <Text style={styles.buttonText}>Add New Property</Text>
-        </TouchableOpacity>
+        {/* Action Buttons */}
+        <View style={{ flexDirection: 'row', marginVertical: 20, gap: 12 }}>
+          <TouchableOpacity
+            style={[styles.button, { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}
+            onPress={() => setShowAddProperty(true)}
+          >
+            <Ionicons name="add-circle-outline" size={20} color="white" style={{ marginRight: 8 }} />
+            <Text style={styles.buttonText}>Add Property</Text>
+          </TouchableOpacity>
+          
+          {properties.some(p => p.icalUrl) && (
+            <TouchableOpacity
+              style={[
+                styles.button, 
+                { 
+                  flex: 1, 
+                  flexDirection: 'row', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  backgroundColor: isSyncing ? '#94A3B8' : '#10B981'
+                }
+              ]}
+              onPress={handleSyncAllProperties}
+              disabled={isSyncing}
+            >
+              <Ionicons 
+                name={isSyncing ? "sync" : "refresh-outline"} 
+                size={20} 
+                color="white" 
+                style={{ marginRight: 8 }} 
+              />
+              <Text style={styles.buttonText}>
+                {isSyncing ? 'Syncing...' : 'Sync All'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Properties List */}
         {properties.length === 0 ? (
@@ -335,6 +535,32 @@ export default function PropertiesScreen() {
                     ) : null}
                   </View>
                   <Text style={styles.muted}>{property.address}</Text>
+                  {property.icalUrl && (
+                    <TouchableOpacity
+                      onPress={() => handleSyncProperty(property)}
+                      disabled={isSyncing}
+                      style={{ 
+                        flexDirection: 'row', 
+                        alignItems: 'center', 
+                        marginTop: 6,
+                        paddingVertical: 4,
+                        paddingHorizontal: 8,
+                        backgroundColor: '#E3F2FD',
+                        borderRadius: 4,
+                        alignSelf: 'flex-start'
+                      }}
+                    >
+                      <Ionicons 
+                        name={syncingPropertyId === property.id ? "sync" : "calendar-outline"} 
+                        size={12} 
+                        color="#10B981" 
+                        style={{ marginRight: 4 }} 
+                      />
+                      <Text style={{ fontSize: 11, color: '#10B981' }}>
+                        {syncingPropertyId === property.id ? 'Syncing...' : 'Sync calendar'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>

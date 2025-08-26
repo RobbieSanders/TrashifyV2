@@ -22,6 +22,7 @@ interface Property {
   longitude: number | null;
   is_main: number;
   created_at: number | null;
+  icalUrl?: string | null;
 }
 
 interface WorkerHistory {
@@ -46,8 +47,19 @@ interface AccountsState {
     address: string,
     coords: { latitude: number; longitude: number },
     label?: string,
-    makeMain?: boolean
+    makeMain?: boolean,
+    icalUrl?: string
   ) => Promise<string>;
+  updateProperty: (
+    userId: string,
+    propertyId: string,
+    updates: {
+      address?: string;
+      coords?: { latitude: number; longitude: number };
+      label?: string;
+      icalUrl?: string | null;
+    }
+  ) => Promise<void>;
   removeProperty: (userId: string, propertyId: string) => Promise<void>;
   setAsMain: (userId: string, propertyId: string) => Promise<void>;
   loadWorkerHistory: (userId: string) => Promise<void>;
@@ -97,7 +109,8 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     address: string,
     coords: { latitude: number; longitude: number },
     label?: string,
-    makeMain?: boolean
+    makeMain?: boolean,
+    icalUrl?: string
   ) => {
     if (!isFirebaseConfigured || !db) {
       throw new Error('Firebase not configured');
@@ -111,7 +124,8 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
       longitude: coords.longitude,
       label: label || null,
       is_main: makeMain ? 1 : 0,
-      created_at: Date.now()
+      created_at: Date.now(),
+      icalUrl: icalUrl || null
     };
 
     try {
@@ -134,6 +148,44 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
       return id;
     } catch (error) {
       console.error('[accountsStore] Error adding property:', error);
+      throw error;
+    }
+  },
+
+  updateProperty: async (
+    userId: string,
+    propertyId: string,
+    updates: {
+      address?: string;
+      coords?: { latitude: number; longitude: number };
+      label?: string;
+      icalUrl?: string | null;
+    }
+  ) => {
+    if (!isFirebaseConfigured || !db) {
+      console.warn('[accountsStore] Firebase not configured');
+      return;
+    }
+
+    try {
+      const updateData: any = {};
+      
+      if (updates.address !== undefined) updateData.address = updates.address;
+      if (updates.label !== undefined) updateData.label = updates.label;
+      if (updates.icalUrl !== undefined) updateData.icalUrl = updates.icalUrl;
+      if (updates.coords) {
+        updateData.latitude = updates.coords.latitude;
+        updateData.longitude = updates.coords.longitude;
+      }
+
+      await updateDoc(doc(db, 'properties', propertyId), updateData);
+      
+      // Reload properties
+      await get().loadProperties(userId);
+      
+      console.log('[accountsStore] Updated property:', propertyId);
+    } catch (error) {
+      console.error('[accountsStore] Error updating property:', error);
       throw error;
     }
   },
