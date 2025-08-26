@@ -3,6 +3,7 @@ import type { Job, Coordinates } from './types';
 
 type State = {
   jobs: Job[];
+  workRadius: number; // Worker's radius in miles
   createJob: (input: { address: string; destination: Coordinates; hostId?: string; hostFirstName?: string; hostLastName?: string; notes?: string; needsApproval?: boolean }) => Job;
   acceptJob: (id: string, start: Coordinates, workerId?: string) => void;
   tickJob: (id: string, delta?: number) => void; // simulate movement
@@ -10,11 +11,14 @@ type State = {
   approveJob: (id: string) => void;
   cancelJob: (id: string, userId: string, reason?: string) => void;
   setJobs: (jobs: Job[]) => void; // replace local state from Firestore
+  setWorkRadius: (radius: number) => void; // Update work radius
 };
 
 export const useTrashifyStore = create<State>((set, get) => ({
   jobs: [],
+  workRadius: 10, // Default 10 miles
   setJobs: (jobs) => set({ jobs }),
+  setWorkRadius: (radius) => set({ workRadius: radius }),
   createJob: ({ address, destination, hostId, hostFirstName, hostLastName, notes, needsApproval }) => {
     const job: Job = {
       id: Math.random().toString(36).slice(2),

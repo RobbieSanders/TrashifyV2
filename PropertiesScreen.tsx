@@ -243,7 +243,7 @@ export default function PropertiesScreen() {
               </View>
 
               {/* Address suggestions */}
-              {showSuggestions && addressSuggestions.length > 0 && (
+              {showSuggestions && addressSuggestions.length > 0 ? (
                 <View style={{
                   backgroundColor: 'white',
                   borderRadius: 8,
@@ -277,7 +277,7 @@ export default function PropertiesScreen() {
                     })}
                   </ScrollView>
                 </View>
-              )}
+              ) : null}
 
               <TouchableOpacity
                 style={[styles.button, { marginTop: 20 }]}
@@ -302,10 +302,8 @@ export default function PropertiesScreen() {
           style={[styles.button, { marginVertical: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }]}
           onPress={() => setShowAddProperty(true)}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Ionicons name="add-circle-outline" size={20} color="white" style={{ marginRight: 8 }} />
-            <Text style={styles.buttonText}>Add New Property</Text>
-          </View>
+          <Ionicons name="add-circle-outline" size={20} color="white" style={{ marginRight: 8 }} />
+          <Text style={styles.buttonText}>Add New Property</Text>
         </TouchableOpacity>
 
         {/* Properties List */}
@@ -330,24 +328,24 @@ export default function PropertiesScreen() {
                       style={{ marginRight: 8 }}
                     />
                     <Text style={styles.subtitle}>{property.label || 'Property'}</Text>
-                    {property.is_main && (
+                    {property.is_main ? (
                       <View style={[styles.badge, { marginLeft: 8 }]}>
                         <Text style={styles.badgeText}>MAIN</Text>
                       </View>
-                    )}
+                    ) : null}
                   </View>
                   <Text style={styles.muted}>{property.address}</Text>
                 </View>
                 
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  {!property.is_main && (
+                  {!property.is_main ? (
                     <TouchableOpacity
                       onPress={() => user?.uid && setAsMain(user.uid, property.id)}
                       style={{ padding: 8, marginRight: 4 }}
                     >
                       <Ionicons name="star-outline" size={20} color="#1E88E5" />
                     </TouchableOpacity>
-                  )}
+                  ) : null}
                   <TouchableOpacity
                     onPress={() => handleEditProperty(property)}
                     style={{ padding: 8, marginRight: 4 }}

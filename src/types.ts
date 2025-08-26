@@ -30,6 +30,10 @@ export interface Job {
   notes?: string;
   needsApproval?: boolean;
   
+  // Multi-job priority fields
+  workerPriority?: number; // Priority in worker's queue (1 = first, 2 = second, etc.)
+  estimatedStartTime?: number; // Estimated time when worker will start this job
+  
   // Recurring pickup fields
   isRecurring?: boolean;
   recurringSchedule?: RecurringSchedule;

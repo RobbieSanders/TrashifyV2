@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, onSnapshot, query, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, onSnapshot, query, updateDoc, where, getDocs } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './firebase';
 import type { Job, Coordinates } from './types';
 
@@ -105,13 +105,29 @@ export async function createJobFS(input: { address: string; destination: Coordin
 
 export async function acceptJobFS(id: string, start: Coordinates, workerId?: string) {
   if (!isFirebaseConfigured || !db) throw new Error('FIREBASE_NOT_CONFIGURED');
+  
+  // Get all active jobs for this worker to determine priority
+  let workerPriority = 1;
+  if (workerId) {
+    const jobsCol = getJobsCollection();
+    if (jobsCol) {
+      const q = query(jobsCol, where('workerId', '==', workerId), where('status', 'in', ['accepted', 'in_progress']));
+      const snapshot = await getDocs(q);
+      // Priority is the number of existing active jobs + 1
+      workerPriority = snapshot.size + 1;
+    }
+  }
+  
   const ref = doc(db, 'jobs', id);
   await updateDoc(ref, {
     status: 'accepted',
     acceptedAt: Date.now(),
     startLocation: start,
     workerLocation: start,
-  workerId,
+    workerId,
+    workerPriority,
+    // Estimate 15 minutes per job ahead in queue
+    estimatedStartTime: Date.now() + ((workerPriority - 1) * 15 * 60 * 1000)
   } as any);
 }
 
@@ -130,7 +146,39 @@ export async function updateWorkerLocationFS(id: string, loc: Coordinates) {
 export async function completeJobFS(id: string) {
   if (!isFirebaseConfigured || !db) throw new Error('FIREBASE_NOT_CONFIGURED');
   const ref = doc(db, 'jobs', id);
-  await updateDoc(ref, { status: 'completed', progress: 1 } as any);
+  
+  // Get the job to find the worker
+  const jobsCol = getJobsCollection();
+  if (jobsCol) {
+    const jobDoc = await getDocs(query(jobsCol, where('id', '==', id)));
+    if (!jobDoc.empty) {
+      const jobData = jobDoc.docs[0].data();
+      const workerId = jobData.workerId;
+      
+      if (workerId) {
+        // Update priorities for remaining jobs
+        const q = query(jobsCol, where('workerId', '==', workerId), where('status', 'in', ['accepted', 'in_progress']));
+        const snapshot = await getDocs(q);
+        
+        // Decrease priority for all jobs with higher priority
+        for (const doc of snapshot.docs) {
+          const data = doc.data();
+          if (data.workerPriority && data.workerPriority > (jobData.workerPriority || 0)) {
+            await updateDoc(doc.ref, {
+              workerPriority: data.workerPriority - 1,
+              estimatedStartTime: Date.now() + ((data.workerPriority - 2) * 15 * 60 * 1000)
+            } as any);
+          }
+        }
+      }
+    }
+  }
+  
+  await updateDoc(ref, { 
+    status: 'completed', 
+    progress: 1,
+    completedAt: Date.now()
+  } as any);
 }
 
 export async function approveJobFS(id: string) {
