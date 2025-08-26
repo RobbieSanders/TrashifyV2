@@ -22,7 +22,7 @@ import {
   approveJobFS,
   cancelJobFS 
 } from './src/jobsService';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from './src/firebase';
 import { 
   geocodeAddressCrossPlatform, 
@@ -145,8 +145,9 @@ export default function App() {
   );
 }
 
-// Import AdminDashboard
+// Import AdminDashboard and WorkerSettings
 import { AdminDashboard } from './src/AdminDashboard';
+import WorkerSettings from './src/WorkerSettings';
 
 // Admin navigation stack
 function AdminStack() {
@@ -727,7 +728,11 @@ function HostHomeScreen({ navigation }: any) {
         onRequestClose={() => setShowPickupModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxHeight: '80%' }]}>
+          <View style={[styles.modalContent, { 
+            maxHeight: Platform.OS === 'web' ? '90%' : '80%',
+            maxWidth: 500,
+            width: '100%'
+          }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <Text style={styles.title}>Schedule New Pickup</Text>
               <TouchableOpacity onPress={() => setShowPickupModal(false)}>
@@ -735,7 +740,12 @@ function HostHomeScreen({ navigation }: any) {
               </TouchableOpacity>
             </View>
             
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView 
+              showsVerticalScrollIndicator={false} 
+              keyboardShouldPersistTaps="handled"
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 24 }}
+            >
               {/* Recurring Pickup Toggle */}
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
                 <Text style={[styles.subtitle, { flex: 1 }]}>Recurring Pickup</Text>
@@ -1423,6 +1433,38 @@ function WorkerHistoryStack() {
   );
 }
 
+// Worker Settings Stack
+function WorkerSettingsStack() {
+  return (
+    <Stack.Navigator>
+      <Stack.Screen 
+        name="WorkerSettingsMain" 
+        component={WorkerSettings} 
+        options={({ navigation }: any) => ({ 
+          title: 'Settings',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="Notifications" 
+        component={NotificationsScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Notifications',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="HostProfile" 
+        component={HostProfileScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Profile',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+    </Stack.Navigator>
+  );
+}
+
 // Worker tabs to show Jobs alongside Home for workers
 function WorkerTabs() {
   return (
@@ -1444,13 +1486,17 @@ function WorkerTabs() {
           paddingTop: 10,
         },
         tabBarIcon: ({ color, size }: { color: string; size: number }) => {
-          const icon = route.name === 'Home' ? 'briefcase' : 'time';
+          let icon = 'help';
+          if (route.name === 'Home') icon = 'briefcase';
+          else if (route.name === 'History') icon = 'time';
+          else if (route.name === 'Settings') icon = 'settings';
           return <Ionicons name={icon as any} size={size} color={color} />;
         },
       })}
     >
       <WorkerTab.Screen name="Home" component={WorkerOnlyStack} />
       <WorkerTab.Screen name="History" component={WorkerHistoryStack} options={{ title: 'History' }} />
+      <WorkerTab.Screen name="Settings" component={WorkerSettingsStack} options={{ title: 'Settings' }} />
     </WorkerTab.Navigator>
   );
 }
@@ -1459,6 +1505,9 @@ function WorkerHomeScreen({ navigation }: any) {
   const { width, height } = useWindowDimensions();
   const isTwoPane = width >= 900 || (width >= 700 && width > height);
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
+  const workRadius = useTrashifyStore(s => s.workRadius); // Use global state
+  const setWorkRadius = useTrashifyStore(s => s.setWorkRadius); // Get setter for initial load
+  const [mapRegion, setMapRegion] = useState<any>(null);
   const intervalRef = useRef<any>(null);
   const locationWatchRef = useRef<any>(null);
   const jobs = useTrashifyStore(s => s.jobs);
@@ -1469,6 +1518,31 @@ function WorkerHomeScreen({ navigation }: any) {
   const cancelJobLocal = useTrashifyStore(s => s.cancelJob);
   const insets = useSafeAreaInsets();
   const user = useAuthStore(s => s.user);
+  const [selectedJobForStart, setSelectedJobForStart] = useState<string | null>(null);
+
+  // Load worker's radius setting from Firestore on initial mount
+  useEffect(() => {
+    const loadWorkerRadius = async () => {
+      if (!user?.uid || !db) return;
+      
+      try {
+        const docRef = doc(db, 'users', user.uid);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.workRadius) {
+            setWorkRadius(data.workRadius); // Update global state
+            console.log('[WorkerHomeScreen] Loaded work radius:', data.workRadius);
+          }
+        }
+      } catch (error) {
+        console.error('[WorkerHomeScreen] Error loading work radius:', error);
+      }
+    };
+    
+    loadWorkerRadius();
+  }, [user?.uid]);
 
   // Subscribe to Firestore jobs
   useEffect(() => {
@@ -1509,11 +1583,50 @@ function WorkerHomeScreen({ navigation }: any) {
     }
   }, []);
 
-  // Jobs assigned to this worker
-  const myActiveJob = jobs.find(j => j.workerId === user?.uid && (j.status === 'in_progress' || j.status === 'accepted'));
+  // Jobs assigned to this worker - sorted by priority
+  const myActiveJobs = jobs
+    .filter(j => j.workerId === user?.uid && (j.status === 'in_progress' || j.status === 'accepted'))
+    .sort((a, b) => (a.workerPriority || 0) - (b.workerPriority || 0));
+  const myActiveJob = myActiveJobs.find(j => j.status === 'in_progress') || myActiveJobs[0]; // Current job or next in queue
   const myAssignedJobs = jobs.filter(j => j.workerId === user?.uid);
-  // Open jobs (unassigned) are visible for acceptance; show who requested them
-  const openJobs = jobs.filter(j => j.status === 'open' && !j.workerId);
+  
+  // Filter open jobs by distance (only jobs within worker's radius)
+  const allOpenJobs = jobs.filter(j => j.status === 'open' && !j.workerId);
+  const openJobs = allOpenJobs.filter(job => {
+    // If no user location, show all jobs (can't calculate distance)
+    if (!userLocation?.coords || !job.destination) return true;
+    
+    // Calculate distance to job
+    const distance = calculateDistance(
+      { 
+        latitude: userLocation.coords.latitude, 
+        longitude: userLocation.coords.longitude 
+      },
+      job.destination
+    );
+    
+    // Convert meters to miles (1 mile = 1609.34 meters)
+    const distanceInMiles = distance / 1609.34;
+    
+    // Only show jobs within the worker's radius
+    return distanceInMiles <= workRadius;
+  });
+
+  // Jobs outside radius (for informational display)
+  const jobsOutsideRadius = allOpenJobs.filter(job => {
+    if (!userLocation?.coords || !job.destination) return false;
+    
+    const distance = calculateDistance(
+      { 
+        latitude: userLocation.coords.latitude, 
+        longitude: userLocation.coords.longitude 
+      },
+      job.destination
+    );
+    
+    const distanceInMiles = distance / 1609.34;
+    return distanceInMiles > workRadius;
+  });
 
   // Start real-time location tracking when worker has an active job
   useEffect(() => {
@@ -1550,22 +1663,29 @@ function WorkerHomeScreen({ navigation }: any) {
     };
   }, [myActiveJob?.id]);
   
-  // Get all relevant jobs for the map (accepted by this worker + open jobs)
+  // Get all relevant jobs for the map (only active jobs - no cancelled or completed)
   const relevantJobs = jobs.filter(j => 
-    j.workerId === user?.uid || j.status === 'open'
+    (j.workerId === user?.uid || j.status === 'open') && 
+    j.status !== 'cancelled' && 
+    j.status !== 'completed'
   );
 
   // Calculate map region to show all relevant jobs
   const getMapRegion = () => {
+    // If user has location, default to their location
+    if (userLocation?.coords) {
+      return {
+        latitude: userLocation.coords.latitude,
+        longitude: userLocation.coords.longitude,
+        latitudeDelta: 0.04,
+        longitudeDelta: 0.04,
+      };
+    }
+    
+    // If no user location but there are jobs, center on jobs
     if (relevantJobs.length > 0) {
       const lats = relevantJobs.map(j => j.destination.latitude);
       const lngs = relevantJobs.map(j => j.destination.longitude);
-      
-      // Include user location if available
-      if (userLocation?.coords) {
-        lats.push(userLocation.coords.latitude);
-        lngs.push(userLocation.coords.longitude);
-      }
       
       const minLat = Math.min(...lats);
       const maxLat = Math.max(...lats);
@@ -1585,14 +1705,26 @@ function WorkerHomeScreen({ navigation }: any) {
       };
     }
     
-    // Default to user location or San Francisco
+    // Default to San Francisco
     return {
-      latitude: userLocation?.coords.latitude || 37.789,
-      longitude: userLocation?.coords.longitude || -122.43,
+      latitude: 37.789,
+      longitude: -122.43,
       latitudeDelta: 0.04,
       longitudeDelta: 0.04,
     };
   };
+
+  // Update map region when user location changes
+  useEffect(() => {
+    if (userLocation?.coords) {
+      setMapRegion({
+        latitude: userLocation.coords.latitude,
+        longitude: userLocation.coords.longitude,
+        latitudeDelta: 0.04,
+        longitudeDelta: 0.04,
+      });
+    }
+  }, [userLocation]);
 
   const onAccept = async (job: Job) => {
     const start = userLocation?.coords
@@ -1731,7 +1863,7 @@ function WorkerHomeScreen({ navigation }: any) {
     Linking.openURL(url);
   };
 
-  const mapInitial = getMapRegion();
+  const mapInitial = mapRegion || getMapRegion();
 
   return (
     <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
@@ -1741,11 +1873,12 @@ function WorkerHomeScreen({ navigation }: any) {
           <Map
             style={{ flex: 1 }}
             initialRegion={mapInitial}
+            region={mapRegion}
             showsUserLocation
           >
-            {/* Job destination markers */}
+            {/* Job destination markers - only show active jobs */}
             {jobs
-              .filter(j => j.status !== 'completed')
+              .filter(j => j.status !== 'completed' && j.status !== 'cancelled')
               .map(j => (
                 <Marker
                   key={j.id}
@@ -1755,80 +1888,304 @@ function WorkerHomeScreen({ navigation }: any) {
                 />
               ))}
             
-            {/* Worker location and route */}
-            {myActiveJob?.workerLocation && (
-              <>
-                <Marker
-                  coordinate={myActiveJob.workerLocation}
-                  title="Worker"
-                  pinColor="#10B981"
-                />
-                {myActiveJob.destination && (
-                  <Polyline
-                    coordinates={[myActiveJob.workerLocation, myActiveJob.destination]}
-                    strokeColor="#1E88E5"
-                    strokeWidth={3}
+            {/* Worker location and routes for all active jobs */}
+            {myActiveJobs.map((job, index) => (
+              <React.Fragment key={job.id}>
+                {job.workerLocation && index === 0 && (
+                  <Marker
+                    coordinate={job.workerLocation}
+                    title="Worker"
+                    pinColor="#10B981"
                   />
                 )}
-              </>
-            )}
+                {job.workerLocation && job.destination && (
+                  <>
+                    <Polyline
+                      coordinates={[job.workerLocation || job.startLocation || job.destination, job.destination]}
+                      strokeColor={index === 0 ? "#1E88E5" : "#94A3B8"}
+                      strokeWidth={index === 0 ? 3 : 2}
+                      lineDashPattern={index === 0 ? undefined : [5, 5]}
+                    />
+                    {/* Priority number marker at midpoint of polyline */}
+                    <Marker
+                      coordinate={{
+                        latitude: ((job.workerLocation?.latitude || job.startLocation?.latitude || job.destination.latitude) + job.destination.latitude) / 2,
+                        longitude: ((job.workerLocation?.longitude || job.startLocation?.longitude || job.destination.longitude) + job.destination.longitude) / 2,
+                      }}
+                      anchor={{ x: 0.5, y: 0.5 }}
+                    >
+                      <View style={{
+                        backgroundColor: index === 0 ? '#1E88E5' : '#64748B',
+                        borderRadius: 12,
+                        width: 24,
+                        height: 24,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                      }}>
+                        <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>
+                          {job.workerPriority || index + 1}
+                        </Text>
+                      </View>
+                    </Marker>
+                  </>
+                )}
+              </React.Fragment>
+            ))}
           </Map>
         </View>
 
         {/* Right: Jobs / Actions */}
         <View style={isTwoPane ? styles.rightPane : styles.rightPaneMobile}>
-          {myActiveJob ? (
-            <View style={[styles.card, { marginBottom: 12 }]}> 
-              <Text style={styles.title}>Active Job</Text>
-              <Text style={styles.subtitle}>{myActiveJob.address}</Text>
-              <Text style={styles.muted}>Status: {myActiveJob.status}</Text>
-              {myActiveJob.notes ? (
-                <Text style={[styles.muted, { marginTop: 4 }]}>Notes: {myActiveJob.notes}</Text>
-              ) : null}
-              <View style={{ flexDirection: 'row', marginTop: 12 }}>
-                <TouchableOpacity style={[styles.button, { marginRight: 8 }]} onPress={openDirections}>
-                  <Text style={styles.buttonText}>Directions</Text>
-                </TouchableOpacity>
-                {(myActiveJob.status === 'in_progress' || myActiveJob.status === 'accepted') && (
-                  <>
-                    <TouchableOpacity style={[styles.button, { backgroundColor: '#10B981', marginRight: 8 }]} onPress={onComplete}>
-                      <Text style={styles.buttonText}>Complete</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {/* Current/Active Jobs Section */}
+            {myActiveJobs.length > 0 && (
+              <>
+                {/* Current/Next Job */}
+                <View style={[styles.card, { marginBottom: 12 }]}> 
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={styles.title}>
+                      {myActiveJob?.status === 'in_progress' ? 'Current Job' : 'Next Job'}
+                    </Text>
+                    {myActiveJob?.workerPriority && (
+                      <View style={{
+                        backgroundColor: '#1E88E5',
+                        borderRadius: 12,
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                      }}>
+                        <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>
+                          #{myActiveJob.workerPriority}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.subtitle}>{myActiveJob?.address}</Text>
+                  <Text style={styles.muted}>Status: {myActiveJob?.status}</Text>
+                  {myActiveJob?.notes ? (
+                    <Text style={[styles.muted, { marginTop: 4 }]}>Notes: {myActiveJob.notes}</Text>
+                  ) : null}
+                  <View style={{ flexDirection: 'row', marginTop: 12, flexWrap: 'wrap' }}>
+                    <TouchableOpacity style={[styles.button, { marginRight: 8, marginBottom: 8 }]} onPress={openDirections}>
+                      <Text style={styles.buttonText}>Directions</Text>
                     </TouchableOpacity>
+                    {myActiveJob?.status === 'accepted' && (
+                      <TouchableOpacity 
+                        style={[styles.button, { backgroundColor: '#10B981', marginRight: 8, marginBottom: 8 }]} 
+                        onPress={() => {
+                          // Mark job as in progress when worker starts it
+                          if (myActiveJob) {
+                            updateDoc(doc(db, 'jobs', myActiveJob.id), { status: 'in_progress' } as any);
+                          }
+                        }}
+                      >
+                        <Text style={styles.buttonText}>Start Job</Text>
+                      </TouchableOpacity>
+                    )}
+                    {myActiveJob?.status === 'in_progress' && (
+                      <TouchableOpacity style={[styles.button, { backgroundColor: '#10B981', marginRight: 8, marginBottom: 8 }]} onPress={onComplete}>
+                        <Text style={styles.buttonText}>Complete</Text>
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity 
-                      style={[styles.button, { backgroundColor: '#EF4444' }]} 
+                      style={[styles.button, { backgroundColor: '#EF4444', marginBottom: 8 }]} 
                       onPress={onCancelJob}
                     >
                       <Text style={styles.buttonText}>Cancel</Text>
                     </TouchableOpacity>
-                  </>
-                )}
-              </View>
-            </View>
-          ) : (
-            <>
-              <Text style={[styles.title, { marginBottom: 8 }]}>Open Jobs</Text>
-              {openJobs.length === 0 ? (
-                <Text style={styles.muted}>No open jobs available</Text>
-              ) : (
-                openJobs.map(job => (
-                  <View key={job.id} style={[styles.card, { marginBottom: 8 }]}>
-                    <Text style={styles.subtitle}>{job.address}</Text>
-                    {job.hostFirstName && job.hostLastName ? (
-                      <Text style={styles.muted}>Requested by: {job.hostFirstName} {job.hostLastName}</Text>
-                    ) : job.hostId ? (
-                      <Text style={styles.muted}>Host ID: {job.hostId}</Text>
-                    ) : null}
-                    {job.notes ? (
-                      <Text style={[styles.muted, { marginTop: 4 }]}>Notes: {job.notes}</Text>
-                    ) : null}
-                    <TouchableOpacity style={[styles.button, { marginTop: 8 }]} onPress={() => onAccept(job)}>
-                      <Text style={styles.buttonText}>Accept</Text>
-                    </TouchableOpacity>
                   </View>
-                ))
+                </View>
+                
+                {/* Queue of other jobs */}
+                {myActiveJobs.length > 1 && (
+                  <View style={[styles.card, { backgroundColor: '#F8FAFC', marginBottom: 12 }]}>
+                    <Text style={[styles.subtitle, { fontWeight: '600', marginBottom: 8 }]}>
+                      Job Queue ({myActiveJobs.length - 1} waiting)
+                    </Text>
+                    {myActiveJobs.slice(1).map((job, index) => (
+                      <View key={job.id} style={{
+                        paddingVertical: 8,
+                        borderTopWidth: index > 0 ? 1 : 0,
+                        borderTopColor: '#E5E7EB',
+                      }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13, color: '#334155' }}>
+                              #{job.workerPriority} - {job.address}
+                            </Text>
+                            {job.estimatedStartTime && (
+                              <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                                Est. start: {new Date(job.estimatedStartTime).toLocaleTimeString()}
+                              </Text>
+                            )}
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              Alert.alert(
+                                'Remove from Queue',
+                                `Remove "${job.address}" from your queue?`,
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  { 
+                                    text: 'Remove', 
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                      try {
+                                        // Reset job to open status so other workers can pick it up
+                                        const ref = doc(db, 'jobs', job.id);
+                                        await updateDoc(ref, { 
+                                          status: 'open',
+                                          workerId: null,
+                                          workerLocation: null,
+                                          startLocation: null,
+                                          acceptedAt: null,
+                                          workerPriority: null,
+                                          estimatedStartTime: null,
+                                          progress: 0
+                                        } as any);
+                                        
+                                        // Update priorities for remaining jobs
+                                        const remainingJobs = myActiveJobs.filter(j => j.id !== job.id && j.workerPriority && j.workerPriority > (job.workerPriority || 0));
+                                        for (const remainingJob of remainingJobs) {
+                                          const remainingRef = doc(db, 'jobs', remainingJob.id);
+                                          await updateDoc(remainingRef, {
+                                            workerPriority: (remainingJob.workerPriority || 1) - 1,
+                                            estimatedStartTime: Date.now() + (((remainingJob.workerPriority || 1) - 2) * 15 * 60 * 1000)
+                                          } as any);
+                                        }
+                                        
+                                        // Notify host
+                                        if (job.hostId) {
+                                          const workerName = user?.firstName && user?.lastName 
+                                            ? `${user.firstName} ${user.lastName}` 
+                                            : 'Worker';
+                                          useNotifications.getState().add(
+                                            job.hostId, 
+                                            `${workerName} removed your pickup from queue. Job is back available.`
+                                          );
+                                        }
+                                      } catch (e) {
+                                        console.error('Failed to remove job from queue:', e);
+                                        Alert.alert('Error', 'Failed to remove job from queue');
+                                      }
+                                    }
+                                  }
+                                ]
+                              );
+                            }}
+                            style={{
+                              padding: 4,
+                              marginLeft: 8,
+                            }}
+                          >
+                            <Ionicons name="close-circle" size={20} color="#EF4444" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                
+                {/* Divider */}
+                <View style={{ 
+                  borderBottomWidth: 1, 
+                  borderBottomColor: '#E5E7EB', 
+                  marginVertical: 12 
+                }} />
+              </>
+            )}
+            
+            {/* Available Jobs Section - Always visible */}
+            <>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={styles.title}>Available Jobs</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="location-outline" size={16} color="#64748B" />
+                  <Text style={[styles.muted, { marginLeft: 4, fontSize: 12 }]}>
+                    Within {workRadius} miles
+                  </Text>
+                </View>
+              </View>
+              
+              {openJobs.length === 0 && jobsOutsideRadius.length === 0 ? (
+                <Text style={styles.muted}>No open jobs available</Text>
+              ) : openJobs.length === 0 && jobsOutsideRadius.length > 0 ? (
+                <View style={[styles.card, { backgroundColor: '#FEF3C7', borderColor: '#F59E0B' }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="alert-circle" size={20} color="#F59E0B" />
+                    <Text style={[styles.subtitle, { marginLeft: 8, color: '#92400E' }]}>
+                      {jobsOutsideRadius.length} job{jobsOutsideRadius.length > 1 ? 's' : ''} outside your radius
+                    </Text>
+                  </View>
+                  <Text style={[styles.muted, { marginTop: 8, color: '#92400E' }]}>
+                    Adjust your work radius in Settings to see more jobs
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  {openJobs.map(job => {
+                    // Calculate distance for display
+                    let distanceInMiles = null;
+                    if (userLocation?.coords && job.destination) {
+                      const distance = calculateDistance(
+                        { 
+                          latitude: userLocation.coords.latitude, 
+                          longitude: userLocation.coords.longitude 
+                        },
+                        job.destination
+                      );
+                      distanceInMiles = (distance / 1609.34).toFixed(1);
+                    }
+                    
+                    return (
+                      <View key={job.id} style={[styles.card, { marginBottom: 8 }]}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.subtitle}>{job.address}</Text>
+                            {job.hostFirstName && job.hostLastName ? (
+                              <Text style={styles.muted}>Requested by: {job.hostFirstName} {job.hostLastName}</Text>
+                            ) : job.hostId ? (
+                              <Text style={styles.muted}>Host ID: {job.hostId}</Text>
+                            ) : null}
+                          </View>
+                          {distanceInMiles && (
+                            <View style={{ 
+                              backgroundColor: '#E3F2FD', 
+                              paddingHorizontal: 8, 
+                              paddingVertical: 4, 
+                              borderRadius: 12,
+                              marginLeft: 8
+                            }}>
+                              <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
+                                {distanceInMiles} mi
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        {job.notes ? (
+                          <Text style={[styles.muted, { marginTop: 4 }]}>Notes: {job.notes}</Text>
+                        ) : null}
+                        <TouchableOpacity style={[styles.button, { marginTop: 8 }]} onPress={() => onAccept(job)}>
+                          <Text style={styles.buttonText}>Accept</Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                  
+                  {jobsOutsideRadius.length > 0 && (
+                    <View style={[styles.card, { 
+                      backgroundColor: '#F8FAFC', 
+                      borderStyle: 'dashed',
+                      marginTop: 8 
+                    }]}>
+                      <Text style={[styles.muted, { fontSize: 12, textAlign: 'center' }]}>
+                        {jobsOutsideRadius.length} more job{jobsOutsideRadius.length > 1 ? 's' : ''} outside your {workRadius} mile radius
+                      </Text>
+                    </View>
+                  )}
+                </>
               )}
             </>
-          )}
+          </ScrollView>
         </View>
       </View>
     </View>
@@ -2191,7 +2548,26 @@ function TrackScreen({ route, navigation }: any) {
         text: 'Waiting for worker',
         subtext: 'Your pickup request is pending acceptance'
       };
-    } else if (job.status === 'accepted' || job.status === 'in_progress') {
+    } else if (job.status === 'accepted') {
+      // Check if worker has other jobs ahead of this one
+      if (job.workerPriority && job.workerPriority > 1) {
+        return {
+          icon: 'hourglass-outline',
+          color: '#3B82F6',
+          text: `You're #${job.workerPriority} in queue`,
+          subtext: job.estimatedStartTime 
+            ? `Worker will arrive around ${new Date(job.estimatedStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+            : 'Worker is completing another job'
+        };
+      } else {
+        return {
+          icon: 'checkmark-circle-outline',
+          color: '#3B82F6',
+          text: 'Worker assigned',
+          subtext: 'Your pickup will start soon'
+        };
+      }
+    } else if (job.status === 'in_progress') {
       return {
         icon: 'navigate',
         color: '#10B981',
@@ -2279,11 +2655,39 @@ function TrackScreen({ route, navigation }: any) {
           </View>
           
           {/* Show distance if worker is on the way */}
-          {distance !== null && (job.status === 'accepted' || job.status === 'in_progress') && (
+          {distance !== null && job.status === 'in_progress' && (
             <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' }}>
               <Text style={{ fontSize: 13, color: '#64748B' }}>
                 Distance: {(distance / 1000).toFixed(1)} km
               </Text>
+            </View>
+          )}
+          
+          {/* Show queue position if waiting */}
+          {job.status === 'accepted' && job.workerPriority && job.workerPriority > 1 && (
+            <View style={{ 
+              marginTop: 12, 
+              paddingTop: 12, 
+              borderTopWidth: 1, 
+              borderTopColor: '#E5E7EB' 
+            }}>
+              <View style={{ 
+                backgroundColor: '#EFF6FF', 
+                borderRadius: 8, 
+                padding: 8,
+                flexDirection: 'row',
+                alignItems: 'center'
+              }}>
+                <Ionicons name="information-circle" size={16} color="#3B82F6" />
+                <Text style={{ 
+                  fontSize: 12, 
+                  color: '#1E40AF', 
+                  marginLeft: 6,
+                  flex: 1
+                }}>
+                  The worker has {job.workerPriority - 1} pickup{job.workerPriority > 2 ? 's' : ''} to complete before yours
+                </Text>
+              </View>
             </View>
           )}
         </View>
@@ -2912,7 +3316,6 @@ const styles = StyleSheet.create({
   modalContent: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 24,
     width: '100%',
     maxWidth: 400,
     alignItems: 'center',
@@ -2924,5 +3327,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+    overflow: 'hidden',
+    padding: 24,
   },
 });
