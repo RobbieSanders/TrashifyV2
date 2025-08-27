@@ -1,4 +1,4 @@
-import { collection, doc, setDoc, query, where, getDocs, updateDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, query, where, getDocs, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 // Basic iCal event interface
@@ -346,35 +346,32 @@ export async function createCleaningJobsFromEvents(
       let shouldCreateJob = false;
       
       if (event.summary) {
-        const summaryLower = event.summary.toLowerCase();
+        // STRICT CHECK: Only "Reserved" (case-insensitive) is an actual booking
+        const summaryLower = event.summary.toLowerCase().trim();
         
-        // Check for different Airbnb event types
-        if (summaryLower === 'reserved' || summaryLower.includes('reserved')) {
+        if (summaryLower === 'reserved') {
           // "Reserved" means it's a confirmed booking
           guestName = 'Reserved';
           shouldCreateJob = true;
-        } else if (summaryLower.includes('airbnb (not available)') || 
-                   summaryLower.includes('not available') ||
-                   summaryLower.includes('blocked')) {
-          // "Airbnb (Not available)" or "Blocked" are not bookings - skip these
-          console.log(`Skipping non-booking event: ${event.summary}`);
-          continue;
+          console.log(`Found actual reservation: ${event.summary}`);
         } else {
-          // Actual guest name - this is a confirmed booking
-          // Try to extract name before any parentheses (e.g., "John Smith (HMXXXXXXXXX)")
-          const nameMatch = event.summary.match(/^([^(]+)/);
-          if (nameMatch) {
-            guestName = nameMatch[1].trim();
-          } else {
-            guestName = event.summary.trim();
-          }
-          shouldCreateJob = true;
+          // Everything else is NOT a booking
+          // This includes:
+          // - "Airbnb (Not available)"
+          // - "Blocked"
+          // - Any other text that isn't exactly "Reserved"
+          console.log(`Skipping non-reservation event: "${event.summary}"`);
+          continue;
         }
+      } else {
+        // No summary = not a booking
+        console.log('Skipping event with no summary');
+        continue;
       }
       
-      // Only create job for actual bookings
+      // Only create job for actual bookings (summary === "Reserved")
       if (!shouldCreateJob) {
-        console.log(`Skipping event without guest booking: ${event.summary || 'No summary'}`);
+        console.log(`Skipping event: "${event.summary || 'No summary'}"`);
         continue;
       }
       
@@ -449,17 +446,22 @@ export async function syncAllPropertiesWithICal(userId: string): Promise<void> {
   if (!db) return;
   
   try {
-    // Get all properties with iCal URLs for the user
+    // Get all properties for the user first
     const propertiesRef = collection(db, 'properties');
     const q = query(
       propertiesRef,
-      where('user_id', '==', userId),
-      where('icalUrl', '!=', null)
+      where('user_id', '==', userId)
     );
     
     const snapshot = await getDocs(q);
     
-    for (const doc of snapshot.docs) {
+    // Filter for properties with iCal URLs locally
+    const propertiesWithICal = snapshot.docs.filter(doc => {
+      const property = doc.data();
+      return property.icalUrl && property.icalUrl.trim() !== '';
+    });
+    
+    for (const doc of propertiesWithICal) {
       const property = doc.data();
       if (property.icalUrl) {
         try {
@@ -494,6 +496,55 @@ export async function syncAllPropertiesWithICal(userId: string): Promise<void> {
     }
   } catch (error) {
     console.error('Error syncing properties with iCal:', error);
+  }
+}
+
+// Remove all iCal-created cleaning jobs for a property by address
+export async function removeICalCleaningJobs(propertyAddress: string): Promise<number> {
+  if (!db) {
+    throw new Error('Firebase not configured');
+  }
+  
+  const cleaningJobsRef = collection(db, 'cleaningJobs');
+  let jobsDeleted = 0;
+  
+  try {
+    // Query for ALL cleaning jobs at this address
+    const addressQuery = query(
+      cleaningJobsRef,
+      where('address', '==', propertyAddress)
+    );
+    
+    const snapshot = await getDocs(addressQuery);
+    
+    console.log(`Found ${snapshot.size} jobs at address ${propertyAddress}`);
+    
+    // Delete only jobs that have iCal markers (not regular jobs)
+    for (const jobDoc of snapshot.docs) {
+      const job = jobDoc.data();
+      // Check if this is an iCal-created job
+      const isICalJob = job.source === 'ical' || 
+                        job.reservationId || 
+                        job.icalEventId || 
+                        job.guestName === 'Reserved Guest' ||
+                        job.guestName === 'Reserved' ||
+                        job.guestName === 'Not available' ||
+                        (job.checkInDate && job.checkOutDate);
+      
+      if (isICalJob) {
+        await deleteDoc(doc(cleaningJobsRef, jobDoc.id));
+        jobsDeleted++;
+        console.log(`Deleted iCal cleaning job: ${jobDoc.id} (status: ${job.status}, guest: ${job.guestName})`);
+      } else {
+        console.log(`Keeping regular job: ${jobDoc.id} (status: ${job.status})`);
+      }
+    }
+    
+    console.log(`Successfully removed ${jobsDeleted} iCal cleaning jobs for address ${propertyAddress}`);
+    return jobsDeleted;
+  } catch (error) {
+    console.error('Error removing iCal cleaning jobs:', error);
+    throw error;
   }
 }
 

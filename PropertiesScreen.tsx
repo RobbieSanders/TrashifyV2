@@ -4,11 +4,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAccountsStore } from './src/accountsStore';
 import { useAuthStore } from './src/authStore';
 import { geocodeAddressCrossPlatform, searchAddresses } from './src/geocodingService';
-import { syncPropertyWithICal, syncAllPropertiesWithICal } from './src/icalService';
+import { syncPropertyWithICal, syncAllPropertiesWithICal, removeICalCleaningJobs } from './src/icalService';
+import { useCleaningJobsStore } from './src/cleaningJobsStore';
 
 export default function PropertiesScreen() {
   const user = useAuthStore(s => s.user);
   const { properties, loadProperties, addNewProperty, updateProperty, removeProperty, setAsMain } = useAccountsStore();
+  const { propertyJobCounts, subscribeToPropertyJobs, unsubscribeFromProperty, subscribeToAllJobs, clearAllSubscriptions } = useCleaningJobsStore();
   const [showAddProperty, setShowAddProperty] = useState(false);
   const [showEditProperty, setShowEditProperty] = useState(false);
   const [editingProperty, setEditingProperty] = useState<any>(null);
@@ -25,8 +27,30 @@ export default function PropertiesScreen() {
   const [syncingPropertyId, setSyncingPropertyId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user?.uid) loadProperties(user.uid);
+    if (user?.uid) {
+      loadProperties(user.uid);
+      // Subscribe to all jobs for the user
+      subscribeToAllJobs(user.uid);
+    }
+    
+    return () => {
+      // Clean up subscriptions when component unmounts
+      clearAllSubscriptions();
+    };
   }, [user?.uid]);
+
+  // Subscribe to cleaning jobs for each property using the new store
+  useEffect(() => {
+    // Subscribe to each property's cleaning jobs
+    properties.forEach(property => {
+      subscribeToPropertyJobs(property.address);
+    });
+
+    // Cleanup function to unsubscribe from properties that were removed
+    return () => {
+      // This will be called when properties change
+    };
+  }, [properties, subscribeToPropertyJobs]);
 
   // Parse address components from full address
   const parseAddress = (fullAddress: string) => {
@@ -81,6 +105,10 @@ export default function PropertiesScreen() {
         const finalIcalUrl = icalUrl.trim() || null;
         
         if (showEditProperty && editingProperty) {
+          // Check if iCal URL is being removed
+          const hadIcalUrl = editingProperty.icalUrl && editingProperty.icalUrl.trim() !== '';
+          const removingIcalUrl = hadIcalUrl && (!finalIcalUrl || finalIcalUrl === '');
+          
           // Update existing property
           await updateProperty(
             user.uid,
@@ -93,6 +121,40 @@ export default function PropertiesScreen() {
             }
           );
           propertyId = editingProperty.id;
+          
+          // If iCal URL was removed, clean up associated cleaning jobs
+          if (removingIcalUrl) {
+            console.log('🧹 Removing iCal cleaning jobs for address:', finalAddress);
+            try {
+              const jobsRemoved = await removeICalCleaningJobs(finalAddress);
+              // Force refresh the subscription for this property
+              setTimeout(() => {
+                subscribeToPropertyJobs(finalAddress);
+              }, 500);
+              
+              if (jobsRemoved > 0) {
+                Alert.alert(
+                  'Property Updated',
+                  `Property updated and ${jobsRemoved} calendar-created cleaning job${jobsRemoved !== 1 ? 's' : ''} removed.`
+                );
+              } else {
+                Alert.alert('Success', 'Property updated successfully');
+              }
+            } catch (error) {
+              console.error('Error removing iCal jobs:', error);
+              Alert.alert('Property Updated', 'Property updated but some calendar jobs could not be removed.');
+            }
+            // Reset form and exit early since we've shown the alert
+            setNewLabel('');
+            setStreetAddress('');
+            setCity('');
+            setState('');
+            setZipCode('');
+            setShowEditProperty(false);
+            setIcalUrl('');
+            setIsValidating(false);
+            return;
+          }
         } else {
           // Add new property
           const newProp = await addNewProperty(
@@ -112,7 +174,7 @@ export default function PropertiesScreen() {
         
         // If there's an iCal URL, automatically sync it
         if (finalIcalUrl && propertyId) {
-          console.log('🔄 Auto-syncing iCal for new property:', finalIcalUrl);
+          console.log('🔄 Auto-syncing iCal for property:', finalIcalUrl);
           setIsSyncing(true);
           try {
             const jobsCreated = await syncPropertyWithICal(
@@ -123,6 +185,11 @@ export default function PropertiesScreen() {
               `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Host',
               coordinates
             );
+            
+            // Force refresh the subscription for this property
+            setTimeout(() => {
+              subscribeToPropertyJobs(finalAddress);
+            }, 500);
             
             if (jobsCreated > 0) {
               Alert.alert(
@@ -201,6 +268,11 @@ export default function PropertiesScreen() {
         }
       );
 
+      // Force refresh the subscription for this property
+      setTimeout(() => {
+        subscribeToPropertyJobs(property.address);
+      }, 500);
+      
       if (jobsCreated > 0) {
         Alert.alert('Success', `Created ${jobsCreated} cleaning job${jobsCreated > 1 ? 's' : ''} from calendar`);
       } else {
@@ -229,6 +301,16 @@ export default function PropertiesScreen() {
     
     try {
       await syncAllPropertiesWithICal(user.uid);
+      
+      // Force refresh subscriptions for all properties
+      setTimeout(() => {
+        properties.forEach(property => {
+          if (property.icalUrl) {
+            subscribeToPropertyJobs(property.address);
+          }
+        });
+      }, 500);
+      
       Alert.alert('Success', 'All calendars have been synced');
     } catch (error) {
       console.error('Sync all error:', error);
@@ -423,6 +505,7 @@ export default function PropertiesScreen() {
                 </View>
                 <Text style={[styles.muted, { fontSize: 11, marginBottom: 8 }]}>
                   Link your Airbnb or vacation rental calendar to automatically schedule cleanings
+                  {showEditProperty && editingProperty?.icalUrl && ' - Clear this field to remove calendar sync'}
                 </Text>
                 <TextInput
                   style={[styles.input, { fontSize: 14 }]}
@@ -445,6 +528,21 @@ export default function PropertiesScreen() {
                     <Ionicons name="checkmark-circle" size={14} color="#1E88E5" style={{ marginRight: 6 }} />
                     <Text style={{ fontSize: 11, color: '#1E88E5' }}>
                       Calendar will sync automatically every 4 hours
+                    </Text>
+                  </View>
+                )}
+                {showEditProperty && editingProperty?.icalUrl && icalUrl === '' && (
+                  <View style={{ 
+                    backgroundColor: '#FEF2F2', 
+                    padding: 8, 
+                    borderRadius: 6,
+                    marginTop: -8,
+                    flexDirection: 'row',
+                    alignItems: 'center'
+                  }}>
+                    <Ionicons name="warning-outline" size={14} color="#EF4444" style={{ marginRight: 6 }} />
+                    <Text style={{ fontSize: 11, color: '#EF4444' }}>
+                      Calendar sync will be removed and related cleaning jobs deleted
                     </Text>
                   </View>
                 )}
@@ -560,6 +658,18 @@ export default function PropertiesScreen() {
                         {syncingPropertyId === property.id ? 'Syncing...' : 'Sync calendar'}
                       </Text>
                     </TouchableOpacity>
+              )}
+                  {propertyJobCounts[property.address] > 0 && (
+                    <View style={{ 
+                      marginTop: 6,
+                      flexDirection: 'row',
+                      alignItems: 'center'
+                    }}>
+                      <Ionicons name="calendar-outline" size={12} color="#64748B" style={{ marginRight: 4 }} />
+                      <Text style={{ fontSize: 11, color: '#64748B' }}>
+                        {propertyJobCounts[property.address]} upcoming cleaning{propertyJobCounts[property.address] !== 1 ? 's' : ''}
+                      </Text>
+                    </View>
                   )}
                 </View>
                 

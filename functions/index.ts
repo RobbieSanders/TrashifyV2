@@ -1,4 +1,4 @@
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 
@@ -75,7 +75,7 @@ export const fetchICalData = functions.https.onRequest((req, res) => {
  */
 export const syncAllCalendars = functions.pubsub
   .schedule('every 6 hours')
-  .onRun(async (context) => {
+  .onRun(async (context: functions.EventContext) => {
     console.log('Starting scheduled calendar sync...');
     
     const db = admin.firestore();
@@ -89,7 +89,7 @@ export const syncAllCalendars = functions.pubsub
       
       console.log(`Found ${propertiesSnapshot.size} properties with iCal URLs`);
       
-      const syncPromises = propertiesSnapshot.docs.map(async (propertyDoc) => {
+  const syncPromises = propertiesSnapshot.docs.map(async (propertyDoc) => {
         const property = propertyDoc.data();
         const propertyId = propertyDoc.id;
         
@@ -303,31 +303,15 @@ async function createCleaningJobsFromEvents(
       .get();
     
     if (existingJobQuery.empty) {
-      // Extract guest info
-      let guestName = 'Not available';
-      let reservationType = 'booking';
-      
-      if (event.summary) {
-        if (event.summary.toLowerCase().includes('not available') || 
-            event.summary.toLowerCase().includes('reserved') ||
-            event.summary.toLowerCase().includes('blocked')) {
-          guestName = 'Not available';
-          if (event.summary.toLowerCase().includes('blocked')) {
-            reservationType = 'blocked';
-          }
-        } else {
-          const nameMatch = event.summary.match(/^([^(]+)/);
-          if (nameMatch) {
-            guestName = nameMatch[1].trim();
-          } else {
-            guestName = event.summary.trim();
-          }
-        }
-      }
-      
-      if (reservationType === 'blocked') {
+      // Only process events with exactly "Reserved" as the summary
+      // Skip all other events (blocked dates, "Airbnb (Not available)", etc.)
+      if (event.summary !== "Reserved") {
+        console.log(`Skipping non-reservation event: ${event.summary}`);
         continue;
       }
+      
+      // For reserved bookings, use a generic guest name
+      const guestName = 'Reserved Guest';
       
       const nightsStayed = Math.ceil((event.endDate.getTime() - event.startDate.getTime()) / (1000 * 60 * 60 * 24));
       
@@ -335,6 +319,7 @@ async function createCleaningJobsFromEvents(
       const cleaningJobId = db.collection('cleaningJobs').doc().id;
       const cleaningJob: any = {
         id: cleaningJobId,
+        source: 'ical', // Mark as iCal-created for cleanup purposes
         address: property.address,
         destination: {
           latitude: property.latitude,
@@ -387,3 +372,80 @@ async function createCleaningJobsFromEvents(
     }
   }
 }
+
+/**
+ * Cleanup: when a property's iCal URL is removed, delete future iCal-based jobs
+ * Uses address instead of propertyId to handle property recreation
+ */
+export const onPropertyICalRemoved = functions.firestore
+  .document('properties/{propertyId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    const beforeUrl = before?.icalUrl || null;
+    const afterUrl = after?.icalUrl || null;
+    const address = before?.address || after?.address;
+
+    // Only act when URL was present and now removed/null/empty string
+    const removed = beforeUrl && (!afterUrl || String(afterUrl).trim() === '');
+    if (!removed || !address) return;
+
+    const db = admin.firestore();
+    const nowMs = Date.now();
+
+    // Fetch all future jobs for this ADDRESS and delete those created from iCal
+    const jobsSnap = await db
+      .collection('cleaningJobs')
+      .where('address', '==', address)
+      .where('preferredDate', '>=', nowMs)
+      .get();
+
+    const toDelete = jobsSnap.docs.filter((d) => !!d.get('icalEventId') || d.get('source') === 'ical');
+
+    if (!toDelete.length) {
+      console.log(`No iCal jobs to remove for address ${address}`);
+      return;
+    }
+
+    const batch = db.batch();
+    toDelete.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+    console.log(`Removed ${toDelete.length} iCal-based future jobs for address ${address}`);
+  });
+
+/**
+ * Cleanup: when a property is deleted, delete all future iCal-based jobs for that address
+ * Uses address to ensure cleanup even if property is recreated
+ */
+export const onPropertyDeleted = functions.firestore
+  .document('properties/{propertyId}')
+  .onDelete(async (snap, context) => {
+    const property = snap.data();
+    const address = property?.address;
+    
+    if (!address) {
+      console.log('No address found for deleted property');
+      return;
+    }
+
+    const db = admin.firestore();
+    const nowMs = Date.now();
+
+    // Delete ALL future cleaning jobs for this address (both iCal and regular)
+    // since the property no longer exists
+    const jobsSnap = await db
+      .collection('cleaningJobs')
+      .where('address', '==', address)
+      .where('preferredDate', '>=', nowMs)
+      .get();
+
+    if (!jobsSnap.empty) {
+      const batch = db.batch();
+      jobsSnap.docs.forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+      console.log(`Removed ${jobsSnap.size} future jobs for deleted property at ${address}`);
+    } else {
+      console.log(`No jobs to remove for deleted property at ${address}`);
+    }
+  });

@@ -78,8 +78,34 @@ export function AdminDashboard({ navigation }: any) {
   const canChangeRoles = isSuper;
 
   useEffect(() => {
+    // Initial load
     loadData();
-  }, []);
+    
+    // Set up real-time listener for cleaning jobs
+    const cleaningJobsUnsubscribe = onSnapshot(
+      collection(db, 'cleaningJobs'),
+      (snapshot) => {
+        const jobsData = snapshot.docs.map(doc => ({
+          ...doc.data(),
+          id: doc.id
+        } as Job));
+        setJobs(jobsData);
+        
+        // Recalculate stats with new jobs data
+        if (users.length > 0) {
+          calculateStats(users, jobsData);
+        }
+      },
+      (error) => {
+        console.error('Error listening to cleaning jobs:', error);
+      }
+    );
+    
+    // Cleanup listener on unmount
+    return () => {
+      cleaningJobsUnsubscribe();
+    };
+  }, [users]); // Re-run when users change to recalculate stats
 
   const loadData = async () => {
     setLoading(true);
@@ -92,9 +118,9 @@ export function AdminDashboard({ navigation }: any) {
       } as UserProfile));
       setUsers(usersData);
 
-      // Load jobs
-      const jobsSnapshot = await getDocs(collection(db, 'jobs'));
-      const jobsData = jobsSnapshot.docs.map(doc => ({
+      // Load cleaning jobs (changed from 'jobs' to 'cleaningJobs')
+      const cleaningJobsSnapshot = await getDocs(collection(db, 'cleaningJobs'));
+      const jobsData = cleaningJobsSnapshot.docs.map(doc => ({
         ...doc.data(),
         id: doc.id
       } as Job));

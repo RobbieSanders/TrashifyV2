@@ -168,6 +168,13 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     }
 
     try {
+      // Get current property to check if iCal URL is being removed
+      const { properties } = get();
+      const property = properties.find(p => p.id === propertyId);
+      const hadIcalUrl = property?.icalUrl && property.icalUrl.trim() !== '';
+      const removingIcalUrl = hadIcalUrl && (!updates.icalUrl || updates.icalUrl.trim() === '');
+      const address = property?.address || updates.address;
+      
       const updateData: any = {};
       
       if (updates.address !== undefined) updateData.address = updates.address;
@@ -179,6 +186,39 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
       }
 
       await updateDoc(doc(db, 'properties', propertyId), updateData);
+      
+      // If iCal URL was removed, clean up iCal-created jobs immediately
+      if (removingIcalUrl && address) {
+        const { query, where, getDocs, deleteDoc: deleteFirestoreDoc } = await import('firebase/firestore');
+        const cleaningJobsRef = collection(db, 'cleaningJobs');
+        // Simple query by address only to avoid index requirement
+        const jobsQuery = query(
+          cleaningJobsRef,
+          where('address', '==', address)
+        );
+        
+        try {
+          const snapshot = await getDocs(jobsQuery);
+          const currentTime = Date.now();
+          // Filter only future iCal-created jobs locally
+          const icalJobs = snapshot.docs.filter(doc => {
+            const data = doc.data();
+            const isFutureJob = data.preferredDate >= currentTime;
+            const isIcalJob = data.source === 'ical' || data.icalEventId || 
+                              data.reservationId || data.guestName === 'Reserved' ||
+                              (data.checkInDate && data.checkOutDate);
+            return isFutureJob && isIcalJob;
+          });
+          
+          if (icalJobs.length > 0) {
+            const deletions = icalJobs.map(doc => deleteFirestoreDoc(doc.ref));
+            await Promise.all(deletions);
+            console.log(`[accountsStore] Deleted ${icalJobs.length} iCal jobs after removing calendar URL`);
+          }
+        } catch (cleanupError) {
+          console.error('[accountsStore] Error cleaning up iCal jobs:', cleanupError);
+        }
+      }
       
       // Reload properties
       await get().loadProperties(userId);
@@ -197,12 +237,45 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     }
 
     try {
+      // Get the property address before deletion for cleanup
+      const { properties } = get();
+      const property = properties.find(p => p.id === propertyId);
+      const address = property?.address;
+      
+      // Delete the property document
       await deleteDoc(doc(db, 'properties', propertyId));
       
-      // Update local state
+      // Update local state immediately
       set(state => ({
         properties: state.properties.filter(p => p.id !== propertyId)
       }));
+      
+      // If address exists, trigger a manual cleanup of cleaning jobs
+      // This helps ensure UI updates immediately
+      if (address) {
+        const { query, where, getDocs, deleteDoc: deleteFirestoreDoc } = await import('firebase/firestore');
+        const cleaningJobsRef = collection(db, 'cleaningJobs');
+        // Simple query by address only to avoid index requirement
+        const jobsQuery = query(
+          cleaningJobsRef,
+          where('address', '==', address)
+        );
+        
+        try {
+          const snapshot = await getDocs(jobsQuery);
+          const currentTime = Date.now();
+          // Filter future jobs locally
+          const futureJobs = snapshot.docs.filter(doc => {
+            const data = doc.data();
+            return data.preferredDate >= currentTime;
+          });
+          const deletions = futureJobs.map(doc => deleteFirestoreDoc(doc.ref));
+          await Promise.all(deletions);
+          console.log(`[accountsStore] Deleted ${futureJobs.length} cleaning jobs for address:`, address);
+        } catch (cleanupError) {
+          console.error('[accountsStore] Error cleaning up jobs:', cleanupError);
+        }
+      }
       
       console.log('[accountsStore] Removed property:', propertyId);
     } catch (error) {

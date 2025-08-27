@@ -11,6 +11,7 @@ import { useAuthStore, initializeAuthListener } from './src/authStore';
 import { useTrashifyStore } from './src/trashifyStore';
 import { useAccountsStore } from './src/accountsStore';
 import { useNotifications } from './src/notificationsStore';
+import { useCleaningJobsStore } from './src/cleaningJobsStore';
 import { Job } from './src/types';
 // Remove local auth import - using Firebase now
 import { 
@@ -467,7 +468,6 @@ function HostHomeScreen({ navigation }: any) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [pendingApprovalJobs, setPendingApprovalJobs] = useState<Job[]>([]);
   const [showCalendarView, setShowCalendarView] = useState(false);
-  const [cleaningJobs, setCleaningJobs] = useState<any[]>([]);
   const jobs = useTrashifyStore(s => s.jobs);
   const createJobLocal = useTrashifyStore(s => s.createJob);
   const setJobs = useTrashifyStore(s => s.setJobs);
@@ -475,6 +475,9 @@ function HostHomeScreen({ navigation }: any) {
   const cancelJobLocal = useTrashifyStore(s => s.cancelJob);
   const { properties, loadProperties, addNewProperty, setAsMain } = useAccountsStore();
   const user = useAuthStore(s => s.user);
+  
+  // Use global cleaning jobs store
+  const { allJobs: cleaningJobs, subscribeToAllJobs } = useCleaningJobsStore();
   
   // Get user's active jobs and pending approval jobs
   const myActiveJobs = jobs.filter(j => 
@@ -520,98 +523,12 @@ function HostHomeScreen({ navigation }: any) {
     };
   }, [user?.uid]);
 
-  // Subscribe to cleaning jobs
+  // Subscribe to cleaning jobs using global store
   useEffect(() => {
-    if (!db || !user?.uid) return;
-    
-    const { collection, query, where, orderBy, onSnapshot, getDocs } = require('firebase/firestore');
-    
-    // Get today's date at start of day
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayTimestamp = today.getTime();
-    
-    const cleaningJobsQuery = query(
-      collection(db, 'cleaningJobs'),
-      where('hostId', '==', user.uid),
-      orderBy('preferredDate', 'asc') // Order by actual cleaning date
-    );
-
-    const unsubscribe = onSnapshot(
-      cleaningJobsQuery, 
-      (snapshot: any) => {
-        const jobs: any[] = [];
-        const now = Date.now();
-        
-        snapshot.forEach((doc: any) => {
-          const jobData = { id: doc.id, ...doc.data() };
-          
-          // Only include future or today's cleanings
-          // Check preferredDate first, then checkOutDate
-          let cleaningDate = jobData.preferredDate;
-          if (!cleaningDate && jobData.checkOutDate) {
-            cleaningDate = new Date(jobData.checkOutDate).getTime();
-          }
-          
-          // Include jobs from today onwards
-          if (cleaningDate >= todayTimestamp) {
-            jobs.push(jobData);
-          }
-        });
-        
-        // Sort by preferredDate/checkOutDate to show next clean first
-        jobs.sort((a, b) => {
-          const aDate = a.preferredDate || (a.checkOutDate ? new Date(a.checkOutDate).getTime() : 0);
-          const bDate = b.preferredDate || (b.checkOutDate ? new Date(b.checkOutDate).getTime() : 0);
-          return aDate - bDate; // Ascending order (earliest first)
-        });
-        
-        setCleaningJobs(jobs);
-      },
-      (error: any) => {
-        // Silently fallback to simpler query without orderBy if index is missing
-        console.log('[HostHomeScreen] Fallback to simple query due to missing index');
-        const fallbackQuery = query(
-          collection(db, 'cleaningJobs'),
-          where('hostId', '==', user.uid)
-        );
-        
-        getDocs(fallbackQuery).then((snapshot: any) => {
-          const jobs: any[] = [];
-          const now = Date.now();
-          
-          snapshot.forEach((doc: any) => {
-            const jobData = { id: doc.id, ...doc.data() };
-            
-            // Only include future or today's cleanings
-            let cleaningDate = jobData.preferredDate;
-            if (!cleaningDate && jobData.checkOutDate) {
-              cleaningDate = new Date(jobData.checkOutDate).getTime();
-            }
-            
-            // Include jobs from today onwards
-            if (cleaningDate >= todayTimestamp) {
-              jobs.push(jobData);
-            }
-          });
-          
-          // Sort manually by preferredDate/checkOutDate
-          jobs.sort((a, b) => {
-            const aDate = a.preferredDate || (a.checkOutDate ? new Date(a.checkOutDate).getTime() : 0);
-            const bDate = b.preferredDate || (b.checkOutDate ? new Date(b.checkOutDate).getTime() : 0);
-            return aDate - bDate; // Ascending order (earliest first)
-          });
-          
-          setCleaningJobs(jobs);
-        }).catch(() => {
-          // Collection doesn't exist yet or other error
-          setCleaningJobs([]);
-        });
-      }
-    );
-
-    return () => unsubscribe();
-  }, [user?.uid]);
+    if (user?.uid) {
+      subscribeToAllJobs(user.uid);
+    }
+  }, [user?.uid, subscribeToAllJobs]);
 
   useEffect(() => {
     if (user?.uid) loadProperties(user.uid);
@@ -1472,7 +1389,7 @@ function HostHomeScreen({ navigation }: any) {
         )}
         
         {/* Next Clean Section */}
-        {cleaningJobs.length > 0 && (
+        {cleaningJobs.filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now()).length > 0 && (
           <View style={{ marginBottom: 20 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <Text style={[styles.title, { fontSize: 20 }]}>Next Clean</Text>
@@ -1483,13 +1400,17 @@ function HostHomeScreen({ navigation }: any) {
                 borderRadius: 12,
               }}>
                 <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
-                  {cleaningJobs.filter(j => j.status === 'scheduled' || j.status === 'pending').length} upcoming
+                  {cleaningJobs.filter(j => j.hostId === user?.uid && (j.status === 'scheduled' || j.status === 'pending')).length} upcoming
                 </Text>
               </View>
             </View>
             
             {/* Show next cleaning job */}
-            {cleaningJobs.filter(j => j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding').slice(0, 1).map(job => (
+            {cleaningJobs
+              .filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding'))
+              .sort((a, b) => a.preferredDate - b.preferredDate)
+              .slice(0, 1)
+              .map(job => (
               <TouchableOpacity
                 key={job.id} 
                 style={[styles.card, {
@@ -1568,12 +1489,19 @@ function HostHomeScreen({ navigation }: any) {
             ))}
             
             {/* Show other upcoming cleans */}
-            {cleaningJobs.filter(j => j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding').slice(1, 3).length > 0 && (
+            {cleaningJobs
+              .filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding'))
+              .sort((a, b) => a.preferredDate - b.preferredDate)
+              .slice(1, 3).length > 0 && (
               <View style={{ marginTop: 8 }}>
                 <Text style={[styles.muted, { fontSize: 11, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }]}>
                   Other Upcoming Cleans
                 </Text>
-                {cleaningJobs.filter(j => j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding').slice(1, 3).map(job => (
+                {cleaningJobs
+                  .filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding'))
+                  .sort((a, b) => a.preferredDate - b.preferredDate)
+                  .slice(1, 3)
+                  .map(job => (
                   <TouchableOpacity
                     key={job.id} 
                     style={[styles.card, { 

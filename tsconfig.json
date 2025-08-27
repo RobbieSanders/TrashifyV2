@@ -4,5 +4,10 @@
   "strict": true,
   "skipLibCheck": true
   },
-  "include": ["**/*.ts", "**/*.tsx", "types/**/*.d.ts"]
+  "include": ["**/*.ts", "**/*.tsx", "types/**/*.d.ts"],
+  "exclude": [
+    "functions/**",
+    "functions/node_modules/**",
+    "functions/lib/**"
+  ]
 }
