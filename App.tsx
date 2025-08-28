@@ -163,6 +163,7 @@ import CleaningCalendarView from './src/screens/cleaning/CleaningCalendarView';
 import CleaningDetailScreen from './src/screens/cleaning/CleaningDetailScreen';
 import AssignCleanerScreen from './src/screens/cleaner/AssignCleanerScreen';
 import { ProfileSettingsScreen } from './src/screens/ProfileSettingsScreen';
+import { CleeviLogo } from './components/CleeviLogo';
 
 // Admin navigation stack
 function AdminStack() {
@@ -220,6 +221,7 @@ function AdminTabs() {
           let icon = 'help';
           if (route.name === 'Admin') icon = 'shield';
           else if (route.name === 'Home') icon = 'home';
+          else if (route.name === 'Cleaning') icon = 'calendar';
           else if (route.name === 'Properties') icon = 'business';
           else if (route.name === 'My Teams') icon = 'people';
           else if (route.name === 'History') icon = 'time';
@@ -228,6 +230,7 @@ function AdminTabs() {
       })}
     >
       <Tab.Screen name="Home" component={HostStack} />
+      <Tab.Screen name="Cleaning" component={CleaningStack} />
       <Tab.Screen name="Properties" component={PropertiesStack} />
       <Tab.Screen name="My Teams" component={MyTeamsStack} />
       <Tab.Screen name="History" component={HistoryStack} />
@@ -288,6 +291,7 @@ function HostTabs() {
         tabBarIcon: ({ color, size }: { color: string; size: number }) => {
           let icon = 'help';
           if (route.name === 'Home') icon = 'home';
+          else if (route.name === 'Cleaning') icon = 'calendar';
           else if (route.name === 'Properties') icon = 'business';
           else if (route.name === 'My Teams') icon = 'people';
           else if (route.name === 'Admin') icon = 'shield';
@@ -296,6 +300,7 @@ function HostTabs() {
       })}
     >
       <Tab.Screen name="Home" component={HostOnlyStack} />
+      <Tab.Screen name="Cleaning" component={CleaningStack} />
       <Tab.Screen name="Properties" component={PropertiesStack} />
       <Tab.Screen name="My Teams" component={MyTeamsStack} />
       {isAdmin && (
@@ -321,7 +326,7 @@ function HostOnlyStack() {
         name="HostHome" 
         component={HostHomeScreen} 
         options={({ navigation }: any) => ({ 
-          title: 'Trashify Host',
+          headerTitle: () => <CleeviLogo size="small" />,
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
@@ -409,7 +414,7 @@ function HostStack() {
         name="HostHome" 
         component={HostHomeScreen} 
         options={({ navigation }: any) => ({ 
-          title: 'Trashify Host',
+          headerTitle: () => <CleeviLogo size="small" />,
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
@@ -1375,10 +1380,9 @@ function HostHomeScreen({ navigation }: any) {
       >
         {/* Welcome Section */}
         <View style={{ marginBottom: 20 }}>
-          <Text style={[styles.title, { fontSize: 28, marginBottom: 4 }]}>
+          <Text style={[styles.title, { fontSize: 20 }]}>
             Welcome back{user?.firstName ? `, ${user.firstName}` : ''}!
           </Text>
-          <Text style={styles.muted}>Manage your trash pickups with ease</Text>
         </View>
       
         {/* Pending Approval Section */}
@@ -1677,34 +1681,6 @@ function HostHomeScreen({ navigation }: any) {
         </View>
 
 
-        {/* Stats Section */}
-        {jobs.filter(j => j.hostId === user?.uid).length > 0 && (
-          <View style={[styles.card, { marginTop: 20, backgroundColor: '#F8FAFC' }]}>
-            <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600', marginBottom: 12 }]}>
-              Your Stats
-            </Text>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={[styles.title, { fontSize: 24, color: '#1E88E5' }]}>
-                  {jobs.filter(j => j.hostId === user?.uid && j.status === 'completed').length}
-                </Text>
-                <Text style={[styles.muted, { fontSize: 12 }]}>Completed</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={[styles.title, { fontSize: 24, color: '#10B981' }]}>
-                  {myActiveJobs.length}
-                </Text>
-                <Text style={[styles.muted, { fontSize: 12 }]}>Active</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={[styles.title, { fontSize: 24, color: '#6B7280' }]}>
-                  {jobs.filter(j => j.hostId === user?.uid).length}
-                </Text>
-                <Text style={[styles.muted, { fontSize: 12 }]}>Total</Text>
-              </View>
-            </View>
-          </View>
-        )}
       </ScrollView>
     </>
   );
@@ -1885,6 +1861,54 @@ function CleanerTabs() {
       <Tab.Screen name="Bids" component={CleanerJobsStack} options={{ title: 'Bids' }} />
       <Tab.Screen name="Profile" component={CleanerProfileStack} />
     </Tab.Navigator>
+  );
+}
+
+// Cleaning Stack with header
+function CleaningStack() {
+  return (
+    <Stack.Navigator>
+      <Stack.Screen 
+        name="CleaningMain" 
+        component={CleaningCalendarView} 
+        options={({ navigation }: any) => ({ 
+          title: 'Cleaning Calendar',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="CleaningDetail" 
+        component={CleaningDetailScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Cleaning Details',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="AssignCleaner" 
+        component={AssignCleanerScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Assign Cleaner',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="Notifications" 
+        component={NotificationsScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Notifications',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="HostProfile" 
+        component={HostProfileScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Profile',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+    </Stack.Navigator>
   );
 }
 
@@ -3503,24 +3527,11 @@ function SignInScreen({ navigation }: any) {
       <View style={{ flex: 1, padding: 20, justifyContent: 'center' }}>
         {/* Logo/Header */}
         <View style={{ alignItems: 'center', marginBottom: 40 }}>
-          <View style={{
-            width: 80,
-            height: 80,
-            borderRadius: 40,
-            backgroundColor: '#1E88E5',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 16,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.2,
-            shadowRadius: 8,
-            elevation: 5,
-          }}>
-            <Ionicons name="trash" size={40} color="white" />
+          <CleeviLogo size="xlarge" variant="icon" />
+          <View style={{ marginTop: 16 }}>
+            <CleeviLogo size="xlarge" variant="text" showText={false} />
           </View>
-          <Text style={{ fontSize: 32, fontWeight: '700', color: '#0F172A' }}>Trashify</Text>
-          <Text style={{ fontSize: 14, color: '#64748B', marginTop: 4 }}>Smart waste management</Text>
+          <Text style={{ fontSize: 14, color: '#64748B', marginTop: 8 }}>Smart cleaning management</Text>
         </View>
 
         {/* Sign In Form */}
@@ -3642,7 +3653,7 @@ function SignUpScreen({ navigation }: any) {
         {/* Header */}
         <View style={{ alignItems: 'center', marginBottom: 32 }}>
           <Text style={{ fontSize: 28, fontWeight: '700', color: '#0F172A' }}>Create Account</Text>
-          <Text style={{ fontSize: 14, color: '#64748B', marginTop: 4 }}>Join Trashify today</Text>
+          <Text style={{ fontSize: 14, color: '#64748B', marginTop: 4 }}>Join Cleevi today</Text>
         </View>
 
         {/* Sign Up Form */}

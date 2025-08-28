@@ -7,7 +7,8 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
-  Platform
+  Platform,
+  Modal
 } from 'react-native';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../../utils/firebase';
@@ -31,6 +32,8 @@ const CleaningCalendarView: React.FC = () => {
   const [cleaningJobs, setCleaningJobs] = useState<CleaningJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<CalendarDay | null>(null);
+  const [showDayModal, setShowDayModal] = useState(false);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -132,16 +135,9 @@ const CleaningCalendarView: React.FC = () => {
 
   const handleDayPress = (day: CalendarDay) => {
     if (day.cleanings.length > 0) {
-      // Navigate to day view with all cleanings for that day
-      navigation.navigate('CleaningDayView', {
-        date: day.date.toISOString(),
-        cleanings: day.cleanings
-      });
-    } else if (day.isCurrentMonth) {
-      // Navigate to create new cleaning for this day
-      navigation.navigate('CreateCleaning', {
-        preferredDate: day.date.toISOString()
-      });
+      // Show modal with day details
+      setSelectedDay(day);
+      setShowDayModal(true);
     }
   };
 
@@ -178,6 +174,7 @@ const CleaningCalendarView: React.FC = () => {
   return (
     <ScrollView
       style={styles.container}
+      contentContainerStyle={styles.scrollContent}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
       }
@@ -255,8 +252,8 @@ const CleaningCalendarView: React.FC = () => {
                       {day.cleanings[0].preferredTime || '10:00 AM'}
                     </Text>
                     <Text style={styles.cleanerName} numberOfLines={1}>
-                      {day.cleanings[0].cleanerFirstName ? 
-                        `${day.cleanings[0].cleanerFirstName}` : 
+                      {(day.cleanings[0].assignedCleanerName || day.cleanings[0].cleanerFirstName) ? 
+                        (day.cleanings[0].assignedCleanerName || `${day.cleanings[0].cleanerFirstName}`) : 
                         'Unassigned'}
                     </Text>
                   </>
@@ -295,8 +292,8 @@ const CleaningCalendarView: React.FC = () => {
                     {new Date(cleaning.preferredDate!).toLocaleDateString()} at {cleaning.preferredTime || '10:00 AM'}
                   </Text>
                   <Text style={styles.cleanerAssigned}>
-                    {cleaning.cleanerFirstName && cleaning.cleanerLastName
-                      ? `${cleaning.cleanerFirstName} ${cleaning.cleanerLastName}`
+                    {(cleaning.assignedCleanerName || (cleaning.cleanerFirstName && cleaning.cleanerLastName))
+                      ? (cleaning.assignedCleanerName || `${cleaning.cleanerFirstName} ${cleaning.cleanerLastName}`)
                       : 'No cleaner assigned'}
                   </Text>
                   {cleaning.guestName && (
@@ -321,6 +318,68 @@ const CleaningCalendarView: React.FC = () => {
           ))
         )}
       </View>
+
+      {/* Day Details Modal */}
+      <Modal
+        visible={showDayModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDayModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {selectedDay ? selectedDay.date.toLocaleDateString('en-US', { 
+                  weekday: 'long', 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric' 
+                }) : ''}
+              </Text>
+              <TouchableOpacity onPress={() => setShowDayModal(false)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalScrollView}>
+              {selectedDay?.cleanings.map((cleaning) => (
+                <TouchableOpacity
+                  key={cleaning.id}
+                  style={styles.modalCleaningCard}
+                  onPress={() => {
+                    setShowDayModal(false);
+                    handleCleaningPress(cleaning);
+                  }}
+                >
+                  <View style={[styles.modalStatusIndicator, { backgroundColor: getStatusColor(cleaning.status) }]} />
+                  <View style={styles.modalCleaningContent}>
+                    <Text style={styles.modalCleaningAddress}>
+                      {cleaning.address}
+                    </Text>
+                    <Text style={styles.modalCleaningTime}>
+                      {cleaning.preferredTime || '10:00 AM'}
+                    </Text>
+                    <Text style={styles.modalCleanerName}>
+                      Cleaner: {(cleaning.assignedCleanerName || (cleaning.cleanerFirstName && cleaning.cleanerLastName))
+                        ? (cleaning.assignedCleanerName || `${cleaning.cleanerFirstName} ${cleaning.cleanerLastName}`)
+                        : 'Not assigned'}
+                    </Text>
+                    {cleaning.guestName && (
+                      <Text style={styles.modalGuestInfo}>
+                        Guest: {cleaning.guestName}
+                      </Text>
+                    )}
+                    <View style={styles.modalStatusBadge}>
+                      <Text style={styles.modalStatusText}>{cleaning.status.toUpperCase()}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -328,53 +387,76 @@ const CleaningCalendarView: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5'
+    backgroundColor: '#F8FAFC'
+  },
+  scrollContent: {
+    paddingBottom: Platform.OS === 'ios' ? 90 : 80,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center'
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC'
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#666'
+    color: '#64748B'
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#4ECDC4',
-    paddingVertical: 15,
-    paddingHorizontal: 20
+    backgroundColor: '#1E88E5',
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    shadowColor: '#1E88E5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
   },
   headerCenter: {
     alignItems: 'center'
   },
   monthYear: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white'
+    fontSize: 22,
+    fontWeight: '700',
+    color: 'white',
+    letterSpacing: 0.5,
   },
   todayButton: {
-    color: 'white',
-    fontSize: 14,
-    marginTop: 5,
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 13,
+    marginTop: 6,
+    fontWeight: '600',
     textDecorationLine: 'underline'
   },
   navButton: {
-    padding: 10
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   navButtonText: {
-    fontSize: 28,
-    color: 'white'
+    fontSize: 20,
+    color: 'white',
+    fontWeight: '600'
   },
   dayNamesContainer: {
     flexDirection: 'row',
-    backgroundColor: 'white',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0'
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   dayNameCell: {
     flex: 1,
@@ -382,105 +464,139 @@ const styles = StyleSheet.create({
   },
   dayNameText: {
     fontSize: 12,
-    fontWeight: 'bold',
-    color: '#666'
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    backgroundColor: 'white'
-  },
-  dayCell: {
-    width: '14.28%',
-    height: Platform.OS === 'web' ? 100 : 90,
-    borderWidth: 0.5,
-    borderColor: '#e0e0e0',
-    padding: 4,
-    backgroundColor: 'white'
-  },
-  otherMonthDay: {
-    backgroundColor: '#fafafa'
-  },
-  todayCell: {
-    backgroundColor: '#e8f5e9'
-  },
-  dayNumber: {
-    fontSize: 14,
-    color: '#333'
-  },
-  otherMonthDayNumber: {
-    color: '#ccc'
-  },
-  todayNumber: {
-    fontWeight: 'bold',
-    color: '#4CAF50'
-  },
-  cleaningInfo: {
-    marginTop: 2,
-    flex: 1
-  },
-  cleaningIndicators: {
-    flexDirection: 'row',
-    marginBottom: 2
-  },
-  cleaningDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 2
-  },
-  moreIndicator: {
-    fontSize: 10,
-    color: '#666',
-    marginLeft: 2
-  },
-  cleaningTime: {
-    fontSize: 9,
-    color: '#1E88E5',
-    fontWeight: '600',
-    marginTop: 1
-  },
-  cleanerName: {
-    fontSize: 10,
-    color: '#666',
-    marginTop: 1,
-    fontWeight: '500'
-  },
-  multipleCleanings: {
-    fontSize: 10,
-    color: '#FF9800',
-    fontWeight: '600',
-    marginTop: 2
-  },
-  upcomingSection: {
-    backgroundColor: 'white',
-    marginTop: 20,
-    padding: 15
-  },
-  upcomingSectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 15
-  },
-  noCleaningsText: {
-    fontSize: 14,
-    color: '#999',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    paddingVertical: 20
-  },
-  cleaningCard: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderRadius: 8,
-    marginBottom: 10,
-    padding: 15,
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3
+    elevation: 3,
+  },
+  dayCell: {
+    width: '14.28%',
+    height: Platform.OS === 'web' ? 50 : 45,
+    borderWidth: 0,
+    padding: 4,
+    backgroundColor: 'white',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+  },
+  otherMonthDay: {
+    backgroundColor: '#F8FAFC'
+  },
+  todayCell: {
+    backgroundColor: '#E0F2FE'
+  },
+  dayNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A'
+  },
+  otherMonthDayNumber: {
+    color: '#CBD5E1'
+  },
+  todayNumber: {
+    fontWeight: '700',
+    color: '#0369A1'
+  },
+  cleaningInfo: {
+    marginTop: 3,
+    flex: 1,
+    alignItems: 'center'
+  },
+  cleaningIndicators: {
+    flexDirection: 'row',
+    marginBottom: 2,
+    justifyContent: 'center'
+  },
+  cleaningDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginHorizontal: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  moreIndicator: {
+    fontSize: 8,
+    color: '#1E88E5',
+    marginLeft: 2,
+    fontWeight: '700'
+  },
+  cleaningTime: {
+    fontSize: 8,
+    color: '#1E88E5',
+    fontWeight: '700',
+    marginTop: 1,
+    textAlign: 'center'
+  },
+  cleanerName: {
+    fontSize: 7,
+    color: '#64748B',
+    marginTop: 1,
+    fontWeight: '600',
+    textAlign: 'center'
+  },
+  multipleCleanings: {
+    fontSize: 8,
+    color: '#F59E0B',
+    fontWeight: '700',
+    marginTop: 2,
+    textAlign: 'center'
+  },
+  upcomingSection: {
+    backgroundColor: '#FFFFFF',
+    marginTop: 24,
+    marginHorizontal: 16,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  upcomingSectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 16,
+    letterSpacing: 0.3,
+  },
+  noCleaningsText: {
+    fontSize: 15,
+    color: '#94A3B8',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 24
+  },
+  cleaningCard: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginBottom: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 4,
   },
   statusIndicator: {
     width: 4,
@@ -538,7 +654,104 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#999',
     marginLeft: 8
-  }
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    flex: 1,
+  },
+  closeButton: {
+    fontSize: 24,
+    color: '#64748B',
+    fontWeight: '300',
+    paddingLeft: 10,
+  },
+  modalScrollView: {
+    maxHeight: 300,
+  },
+  modalCleaningCard: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    marginBottom: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  modalStatusIndicator: {
+    width: 4,
+    marginRight: 12,
+    borderRadius: 2,
+  },
+  modalCleaningContent: {
+    flex: 1,
+  },
+  modalCleaningAddress: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0F172A',
+    marginBottom: 8,
+  },
+  modalCleaningTime: {
+    fontSize: 14,
+    color: '#1E88E5',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  modalCleanerName: {
+    fontSize: 14,
+    color: '#64748B',
+    marginBottom: 4,
+  },
+  modalGuestInfo: {
+    fontSize: 13,
+    color: '#64748B',
+    fontStyle: 'italic',
+    marginBottom: 8,
+  },
+  modalStatusBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  modalStatusText: {
+    fontSize: 11,
+    color: '#1E88E5',
+    fontWeight: '600',
+  },
 });
 
 export default CleaningCalendarView;
