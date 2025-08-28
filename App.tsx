@@ -321,7 +321,7 @@ function AuthStack() {
 
 function HostOnlyStack() {
   return (
-  <Stack.Navigator>
+    <Stack.Navigator>
       <Stack.Screen 
         name="HostHome" 
         component={HostHomeScreen} 
@@ -392,7 +392,7 @@ function HostOnlyStack() {
 
 function WorkerOnlyStack() {
   return (
-  <Stack.Navigator screenOptions={({ navigation }: any) => ({
+    <Stack.Navigator screenOptions={({ navigation }: any) => ({
       headerRight: () => <HeaderIcons navigation={navigation} />,
     })}>
       <Stack.Screen 
@@ -409,7 +409,7 @@ function WorkerOnlyStack() {
 // HOST FLOW
 function HostStack() {
   return (
-  <Stack.Navigator>
+    <Stack.Navigator>
       <Stack.Screen 
         name="HostHome" 
         component={HostHomeScreen} 
@@ -496,6 +496,7 @@ function HostHomeScreen({ navigation }: any) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [pendingApprovalJobs, setPendingApprovalJobs] = useState<Job[]>([]);
   const [showCalendarView, setShowCalendarView] = useState(false);
+  const [showAllServicesModal, setShowAllServicesModal] = useState(false);
   const jobs = useTrashifyStore(s => s.jobs);
   const createJobLocal = useTrashifyStore(s => s.createJob);
   const setJobs = useTrashifyStore(s => s.setJobs);
@@ -1374,9 +1375,213 @@ function HostHomeScreen({ navigation }: any) {
         </View>
       </Modal>
 
+      {/* All Services Modal */}
+      <Modal
+        visible={showAllServicesModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAllServicesModal(false)}
+      >
+        <View style={[styles.modalOverlay, { 
+          paddingTop: Platform.OS === 'web' ? 0 : 60,
+          paddingBottom: Platform.OS === 'web' ? 0 : 20,
+        }]}>
+          <View style={[styles.modalContent, { 
+            flex: Platform.OS === 'web' ? 0 : 1,
+            maxHeight: Platform.OS === 'web' ? '90%' : undefined,
+            height: Platform.OS === 'web' ? 'auto' : '100%',
+            maxWidth: Platform.OS === 'web' ? 600 : '95%',
+            width: '100%',
+            margin: 0,
+            padding: Platform.OS === 'web' ? 24 : 16,
+          }]}>
+            <View style={{ 
+              flexDirection: 'row', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              marginBottom: Platform.OS === 'web' ? 20 : 16,
+              paddingBottom: 12,
+              borderBottomWidth: 1,
+              borderBottomColor: '#E5E7EB'
+            }}>
+              <Text style={[styles.title, { fontSize: Platform.OS === 'web' ? 20 : 18 }]}>All Services</Text>
+              <TouchableOpacity 
+                onPress={() => setShowAllServicesModal(false)}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="close" size={Platform.OS === 'web' ? 24 : 22} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView 
+              showsVerticalScrollIndicator={true} 
+              style={{ flex: 1 }}
+              contentContainerStyle={{ 
+                paddingBottom: Platform.OS === 'web' ? 24 : 20,
+                flexGrow: 1 
+              }}
+              nestedScrollEnabled={true}
+            >
+
+              {/* Trash Services Section */}
+              <View style={{ marginBottom: Platform.OS === 'web' ? 20 : 16 }}>
+                <Text style={[styles.subtitle, { 
+                  fontSize: Platform.OS === 'web' ? 16 : 15, 
+                  fontWeight: '600', 
+                  marginBottom: Platform.OS === 'web' ? 12 : 8,
+                  color: '#0F172A'
+                }]}>
+                  Trash Services ({myActiveJobs.length})
+                </Text>
+                {myActiveJobs.length > 0 ? (
+                  myActiveJobs.slice(0, Platform.OS === 'web' ? 10 : 10).map(job => (
+                    <TouchableOpacity 
+                      key={job.id} 
+                      style={[styles.card, { 
+                        marginBottom: Platform.OS === 'web' ? 12 : 8,
+                        borderLeftWidth: 3,
+                        borderLeftColor: '#F59E0B',
+                        padding: Platform.OS === 'web' ? 12 : 10
+                      }]}
+                      onPress={() => {
+                        setShowAllServicesModal(false);
+                        navigation.navigate('Track', { id: job.id });
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={{
+                          backgroundColor: '#F59E0B',
+                          borderRadius: Platform.OS === 'web' ? 12 : 10,
+                          padding: Platform.OS === 'web' ? 6 : 5,
+                          marginRight: Platform.OS === 'web' ? 8 : 8
+                        }}>
+                          <Ionicons name="trash" size={Platform.OS === 'web' ? 16 : 14} color="white" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.subtitle, { fontSize: Platform.OS === 'web' ? 14 : 13, fontWeight: '600' }]} numberOfLines={1}>
+                            {job.address}
+                          </Text>
+                          <Text style={[styles.muted, { fontSize: Platform.OS === 'web' ? 12 : 11, marginTop: 2 }]}>
+                            {job.status === 'open' ? 'Waiting' : 
+                             job.status === 'accepted' ? 'Assigned' : 
+                             'In progress'}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={[styles.card, { backgroundColor: '#F8F9FA', padding: Platform.OS === 'web' ? 12 : 10 }]}>
+                    <Text style={{ fontSize: Platform.OS === 'web' ? 12 : 11, color: '#6B7280', textAlign: 'center' }}>No active trash services</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Cleaning Services Section */}
+              <View style={{ marginBottom: Platform.OS === 'web' ? 20 : 16 }}>
+                <Text style={[styles.subtitle, { 
+                  fontSize: Platform.OS === 'web' ? 16 : 15, 
+                  fontWeight: '600', 
+                  marginBottom: Platform.OS === 'web' ? 12 : 8,
+                  color: '#0F172A'
+                }]}>
+                  Cleaning Services ({cleaningJobs.length})
+                </Text>
+                {cleaningJobs && cleaningJobs.length > 0 ? (
+                  cleaningJobs.slice(0, Platform.OS === 'web' ? 20 : 15).map(job => (
+                    <TouchableOpacity 
+                      key={job.id} 
+                      style={[styles.card, { 
+                        marginBottom: Platform.OS === 'web' ? 12 : 8,
+                        borderLeftWidth: 3,
+                        borderLeftColor: '#10B981',
+                        padding: Platform.OS === 'web' ? 12 : 10
+                      }]}
+                      onPress={() => {
+                        setShowAllServicesModal(false);
+                        navigation.navigate('CleaningDetail', { cleaningJobId: job.id });
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={{
+                          backgroundColor: '#10B981',
+                          borderRadius: Platform.OS === 'web' ? 12 : 10,
+                          padding: Platform.OS === 'web' ? 6 : 5,
+                          marginRight: Platform.OS === 'web' ? 8 : 8
+                        }}>
+                          <Ionicons name="sparkles" size={Platform.OS === 'web' ? 16 : 14} color="white" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.subtitle, { fontSize: Platform.OS === 'web' ? 14 : 13, fontWeight: '600' }]} numberOfLines={1}>
+                            {job.property?.label || job.address || 'Property Cleaning'}
+                          </Text>
+                          {job.checkOutDate && (
+                            <Text style={[styles.muted, { fontSize: Platform.OS === 'web' ? 12 : 11, marginTop: 2 }]} numberOfLines={1}>
+                              {new Date(job.checkOutDate).toLocaleDateString()}
+                            </Text>
+                          )}
+                        </View>
+                        {(job.assignedCleanerName || job.assignedCleanerId || job.cleanerFirstName) ? (
+                          <Ionicons name="checkmark-circle" size={Platform.OS === 'web' ? 14 : 12} color="#10B981" />
+                        ) : (
+                          <View style={{
+                            backgroundColor: '#FEF3C7',
+                            paddingHorizontal: Platform.OS === 'web' ? 6 : 4,
+                            paddingVertical: Platform.OS === 'web' ? 2 : 2,
+                            borderRadius: 4,
+                          }}>
+                            <Text style={{ fontSize: Platform.OS === 'web' ? 9 : 8, color: '#92400E', fontWeight: '600' }}>
+                              Needs cleaner
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={[styles.card, { backgroundColor: '#F8F9FA', padding: Platform.OS === 'web' ? 12 : 10 }]}>
+                    <Text style={{ fontSize: Platform.OS === 'web' ? 12 : 11, color: '#6B7280', textAlign: 'center' }}>No cleaning services found</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Show More Button for Mobile */}
+              {Platform.OS !== 'web' && cleaningJobs.length > 15 && (
+                <TouchableOpacity 
+                  style={[styles.card, { 
+                    backgroundColor: '#E3F2FD', 
+                    padding: 10,
+                    alignItems: 'center',
+                    marginBottom: 8
+                  }]}
+                  onPress={() => {
+                    setShowAllServicesModal(false);
+                    navigation.navigate('CleaningCalendar');
+                  }}
+                >
+                  <Text style={{ fontSize: 13, color: '#1E88E5', fontWeight: '600' }}>
+                    View All {cleaningJobs.length} Cleaning Services
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* No Services Message - Only show if both are empty */}
+              {myActiveJobs.length === 0 && (!cleaningJobs || cleaningJobs.length === 0) && (
+                <View style={[styles.card, { alignItems: 'center', padding: Platform.OS === 'web' ? 20 : 16 }]}>
+                  <Ionicons name="calendar-outline" size={Platform.OS === 'web' ? 40 : 32} color="#94A3B8" />
+                  <Text style={[styles.muted, { marginTop: 8, textAlign: 'center', fontSize: Platform.OS === 'web' ? 14 : 13 }]}>
+                    No upcoming services scheduled
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <ScrollView 
         style={[styles.screen, { backgroundColor: '#F3F4F6' }]} 
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
       >
         {/* Welcome Section */}
         <View style={{ marginBottom: 20 }}>
@@ -1414,34 +1619,212 @@ function HostHomeScreen({ navigation }: any) {
             </View>
           </View>
         )}
+
+        {/* Services Section - Moved to top with smaller, more compact icons */}
+        <View style={{ marginBottom: 20 }}>
+          <Text style={[styles.title, { fontSize: 20, marginBottom: 12 }]}>Services</Text>
+          
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 }}>
+            {/* Schedule New Pickup */}
+            <TouchableOpacity
+              style={{
+                width: '48%',
+                margin: '1%',
+                backgroundColor: '#1E88E5',
+                borderRadius: 12,
+                padding: 12,
+                alignItems: 'center',
+                shadowColor: '#1E88E5',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.15,
+                shadowRadius: 4,
+                elevation: 3,
+              }}
+              onPress={() => setShowPickupModal(true)}
+            >
+              <Ionicons name="trash-outline" size={20} color="white" style={{ marginBottom: 4 }} />
+              <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Schedule Pickup</Text>
+            </TouchableOpacity>
+
+            {/* Recruit Cleaners */}
+            <TouchableOpacity
+              style={{
+                width: '48%',
+                margin: '1%',
+                backgroundColor: '#10B981',
+                borderRadius: 12,
+                padding: 12,
+                alignItems: 'center',
+                shadowColor: '#10B981',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.15,
+                shadowRadius: 4,
+                elevation: 3,
+              }}
+              onPress={() => navigation.navigate('SearchCleaners')}
+            >
+              <Ionicons name="people-outline" size={20} color="white" style={{ marginBottom: 4 }} />
+              <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Recruit Cleaners</Text>
+            </TouchableOpacity>
+
+            {/* Schedule Emergency Clean */}
+            <TouchableOpacity
+              style={{
+                width: '48%',
+                margin: '1%',
+                backgroundColor: '#EF4444',
+                borderRadius: 12,
+                padding: 12,
+                alignItems: 'center',
+                shadowColor: '#EF4444',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.15,
+                shadowRadius: 4,
+                elevation: 3,
+              }}
+              onPress={() => {
+                Alert.alert('Coming Soon', 'Emergency cleaning service will be available soon!');
+              }}
+            >
+              <Ionicons name="warning-outline" size={20} color="white" style={{ marginBottom: 4 }} />
+              <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Emergency Clean</Text>
+            </TouchableOpacity>
+
+            {/* Schedule Handyman Services */}
+            <TouchableOpacity
+              style={{
+                width: '48%',
+                margin: '1%',
+                backgroundColor: '#8B5CF6',
+                borderRadius: 12,
+                padding: 12,
+                alignItems: 'center',
+                shadowColor: '#8B5CF6',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.15,
+                shadowRadius: 4,
+                elevation: 3,
+              }}
+              onPress={() => {
+                Alert.alert('Coming Soon', 'Handyman services will be available soon!');
+              }}
+            >
+              <Ionicons name="hammer-outline" size={20} color="white" style={{ marginBottom: 4 }} />
+              <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Handyman</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
         
-        {/* Next Clean Section */}
-        {cleaningJobs.filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now()).length > 0 && (
+        {/* Next Services Section */}
+        {(cleaningJobs.filter(j => j && j.hostId === user?.uid && j.preferredDate && j.preferredDate >= Date.now()).length > 0 || 
+          myActiveJobs.length > 0) && (
           <View style={{ marginBottom: 20 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={[styles.title, { fontSize: 20 }]}>Next Clean</Text>
-              <View style={{
-                backgroundColor: '#E3F2FD',
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: 12,
-              }}>
+              <Text style={[styles.title, { fontSize: 20 }]}>Next Services</Text>
+              <TouchableOpacity
+                onPress={() => setShowAllServicesModal(true)}
+                style={{
+                  backgroundColor: '#E3F2FD',
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 12,
+                }}
+              >
                 <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
-                  {cleaningJobs.filter(j => j.hostId === user?.uid && (j.status === 'scheduled' || j.status === 'pending')).length} upcoming
+                  {cleaningJobs.length + myActiveJobs.length} upcoming
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
             
+            {/* Show upcoming trash services first */}
+            {myActiveJobs.slice(0, 2).map(job => (
+              <TouchableOpacity 
+                key={job.id} 
+                style={[styles.card, {
+                  backgroundColor: '#FEF3E2',
+                  borderWidth: 2,
+                  borderColor: '#F59E0B',
+                  marginBottom: 12
+                }]}
+                onPress={() => navigation.navigate('Track', { id: job.id })}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{
+                    backgroundColor: '#F59E0B',
+                    borderRadius: 20,
+                    padding: 8,
+                    marginRight: 12
+                  }}>
+                    <Ionicons name="trash" size={20} color="white" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <View style={{
+                        backgroundColor: '#FEF3E2',
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                        borderRadius: 8,
+                        marginRight: 6,
+                        borderWidth: 1,
+                        borderColor: '#F59E0B',
+                      }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#F59E0B' }}>
+                          Trash Pickup
+                        </Text>
+                      </View>
+                      <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600', flex: 1 }]}>
+                        {job.address}
+                      </Text>
+                    </View>
+                    <Text style={[styles.muted, { fontSize: 12, marginTop: 2 }]}>
+                      Status: {job.status === 'open' ? 'Waiting for worker' : 
+                               job.status === 'accepted' ? 'Worker assigned' : 
+                               'In progress'}
+                    </Text>
+                  </View>
+                </View>
+                
+                {job.notes && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                    <Ionicons name="document-text-outline" size={14} color="#64748B" style={{ marginRight: 6 }} />
+                    <Text style={[styles.muted, { fontSize: 13 }]}>
+                      Notes: {job.notes}
+                    </Text>
+                  </View>
+                )}
+                
+                <View style={{ 
+                  flexDirection: 'row', 
+                  alignItems: 'center',
+                  marginTop: 8,
+                  paddingTop: 8,
+                  borderTopWidth: 1,
+                  borderTopColor: '#E5E7EB'
+                }}>
+                  <Ionicons 
+                    name="time-outline" 
+                    size={14} 
+                    color="#64748B" 
+                    style={{ marginRight: 6 }} 
+                  />
+                  <Text style={{ fontSize: 13, color: '#64748B' }}>
+                    Requested: {new Date(job.createdAt).toLocaleDateString()}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+
             {/* Get all jobs for the next date that has cleaning jobs */}
             {(() => {
               const upcomingJobs = cleaningJobs
-                .filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress'))
+                .filter(j => j && j.hostId === user?.uid && j.preferredDate && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress'))
                 .sort((a, b) => a.preferredDate - b.preferredDate);
               
-              if (upcomingJobs.length === 0) return null;
+              if (upcomingJobs.length === 0 && myActiveJobs.length === 0) return null;
               
               // Find the earliest date with jobs
-              const nextCleanDate = upcomingJobs[0].preferredDate;
+              const nextCleanDate = upcomingJobs[0]?.preferredDate;
+              if (!nextCleanDate) return null;
               
               // Get all jobs on that same date
               const jobsOnNextDate = upcomingJobs.filter(job => {
@@ -1481,9 +1864,24 @@ function HostHomeScreen({ navigation }: any) {
                     <Ionicons name="sparkles" size={20} color="white" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600' }]}>
-                      {job.property?.label || job.address || 'Property Cleaning'}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <View style={{
+                        backgroundColor: '#F0FDFB',
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                        borderRadius: 8,
+                        marginRight: 6,
+                        borderWidth: 1,
+                        borderColor: '#10B981',
+                      }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#10B981' }}>
+                          Cleaning
+                        </Text>
+                      </View>
+                      <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600', flex: 1 }]}>
+                        {job.property?.label || job.address || 'Property'}
+                      </Text>
+                    </View>
                     {job.checkOutDate && (
                       <Text style={[styles.muted, { fontSize: 12, marginTop: 2 }]}>
                         After checkout: {new Date(job.checkOutDate).toLocaleDateString()}
@@ -1576,51 +1974,120 @@ function HostHomeScreen({ navigation }: any) {
                     </View>
                   )}
             
-                  {/* Show other upcoming cleans (after the next date) */}
-                  {remainingJobs.length > 0 && (
+                  {/* Show other upcoming services (after the next date) */}
+                  {(remainingJobs.length > 0 || myActiveJobs.slice(2).length > 0) && (
                     <View style={{ marginTop: 8 }}>
                       <Text style={[styles.muted, { fontSize: 11, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }]}>
-                        Other Upcoming Cleans
+                        Other Upcoming Services
                       </Text>
+                      
+                      {/* Show remaining trash services */}
+                      {myActiveJobs.slice(2, 5).map(job => (
+                        <TouchableOpacity
+                          key={job.id} 
+                          style={[styles.card, { 
+                            marginBottom: 8,
+                            paddingVertical: 10,
+                            borderLeftWidth: 3,
+                            borderLeftColor: '#F59E0B'
+                          }]}
+                          onPress={() => navigation.navigate('Track', { id: job.id })}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <View style={{
+                                  backgroundColor: '#FEF3E2',
+                                  paddingHorizontal: 5,
+                                  paddingVertical: 1,
+                                  borderRadius: 6,
+                                  marginRight: 4,
+                                  borderWidth: 1,
+                                  borderColor: '#F59E0B',
+                                }}>
+                                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#F59E0B' }}>
+                                    Trash
+                                  </Text>
+                                </View>
+                                <Text style={[styles.subtitle, { fontSize: 14 }]}>
+                                  {job.address}
+                                </Text>
+                              </View>
+                              <Text style={[styles.muted, { fontSize: 11, marginTop: 2 }]}>
+                                {new Date(job.createdAt).toLocaleDateString()}
+                              </Text>
+                            </View>
+                            <View style={{
+                              backgroundColor: '#FEF3E2',
+                              paddingHorizontal: 8,
+                              paddingVertical: 3,
+                              borderRadius: 8,
+                            }}>
+                              <Text style={{ fontSize: 10, color: '#F59E0B', fontWeight: '600' }}>
+                                {job.status === 'open' ? 'Waiting' : 
+                                 job.status === 'accepted' ? 'Assigned' : 
+                                 'In progress'}
+                              </Text>
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                      
+                      {/* Show remaining cleaning services */}
                       {remainingJobs.slice(0, 3).map(job => (
-                  <TouchableOpacity
-                    key={job.id} 
-                    style={[styles.card, { 
-                      marginBottom: 8,
-                      paddingVertical: 10,
-                      borderLeftWidth: 3,
-                      borderLeftColor: '#10B981'
-                    }]}
-                    onPress={() => navigation.navigate('CleaningDetail', { cleaningJobId: job.id })}
-                  >
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <View>
-                        <Text style={[styles.subtitle, { fontSize: 14 }]}>
-                          {job.property?.label || job.address || 'Property'}
-                        </Text>
-                        {job.checkOutDate && (
-                          <Text style={[styles.muted, { fontSize: 11, marginTop: 2 }]}>
-                            {new Date(job.checkOutDate).toLocaleDateString()}
-                          </Text>
-                        )}
-                      </View>
-                      {(job.assignedCleanerName || job.assignedCleanerId || job.cleanerFirstName) ? (
-                        <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                      ) : (
-                        <View style={{
-                          backgroundColor: '#FEF3C7',
-                          paddingHorizontal: 8,
-                          paddingVertical: 3,
-                          borderRadius: 8,
-                        }}>
-                          <Text style={{ fontSize: 10, color: '#92400E', fontWeight: '600' }}>
-                            Needs cleaner
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                ))}
+                        <TouchableOpacity
+                          key={job.id} 
+                          style={[styles.card, { 
+                            marginBottom: 8,
+                            paddingVertical: 10,
+                            borderLeftWidth: 3,
+                            borderLeftColor: '#10B981'
+                          }]}
+                          onPress={() => navigation.navigate('CleaningDetail', { cleaningJobId: job.id })}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <View style={{
+                                  backgroundColor: '#F0FDFB',
+                                  paddingHorizontal: 5,
+                                  paddingVertical: 1,
+                                  borderRadius: 6,
+                                  marginRight: 4,
+                                  borderWidth: 1,
+                                  borderColor: '#10B981',
+                                }}>
+                                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#10B981' }}>
+                                    Cleaning
+                                  </Text>
+                                </View>
+                                <Text style={[styles.subtitle, { fontSize: 14 }]}>
+                                  {job.property?.label || job.address || 'Property'}
+                                </Text>
+                              </View>
+                              {job.checkOutDate && (
+                                <Text style={[styles.muted, { fontSize: 11, marginTop: 2 }]}>
+                                  {new Date(job.checkOutDate).toLocaleDateString()}
+                                </Text>
+                              )}
+                            </View>
+                            {(job.assignedCleanerName || job.assignedCleanerId || job.cleanerFirstName) ? (
+                              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                            ) : (
+                              <View style={{
+                                backgroundColor: '#FEF3C7',
+                                paddingHorizontal: 8,
+                                paddingVertical: 3,
+                                borderRadius: 8,
+                              }}>
+                                <Text style={{ fontSize: 10, color: '#92400E', fontWeight: '600' }}>
+                                  Needs cleaner
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      ))}
                     </View>
                   )}
                 </>
@@ -1628,58 +2095,6 @@ function HostHomeScreen({ navigation }: any) {
             })()}
           </View>
         )}
-
-        {/* Action Buttons Section */}
-        <View style={{ marginBottom: 20 }}>
-          <Text style={[styles.title, { fontSize: 20, marginBottom: 12 }]}>Services</Text>
-          
-          {/* Schedule New Pickup Button */}
-          <TouchableOpacity
-            style={[styles.card, {
-              backgroundColor: '#1E88E5',
-              borderWidth: 0,
-              padding: 16,
-              alignItems: 'center',
-              marginBottom: 12,
-              shadowColor: '#1E88E5',
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.2,
-              shadowRadius: 8,
-              elevation: 5,
-            }]}
-            onPress={() => setShowPickupModal(true)}
-          >
-            <Ionicons name="trash-outline" size={24} color="white" style={{ marginBottom: 6 }} />
-            <Text style={[styles.title, { color: 'white', fontSize: 16 }]}>Schedule New Pickup</Text>
-            <Text style={[styles.muted, { color: 'rgba(255,255,255,0.9)', marginTop: 2, fontSize: 12 }]}>
-              Set your trash pickup schedule
-            </Text>
-          </TouchableOpacity>
-
-          {/* Recruit Cleaners Button */}
-          <TouchableOpacity
-            style={[styles.card, {
-              backgroundColor: '#10B981',
-              borderWidth: 0,
-              padding: 16,
-              alignItems: 'center',
-              marginBottom: 12,
-              shadowColor: '#10B981',
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.2,
-              shadowRadius: 8,
-              elevation: 5,
-            }]}
-            onPress={() => navigation.navigate('SearchCleaners')}
-          >
-            <Ionicons name="people-outline" size={24} color="white" style={{ marginBottom: 6 }} />
-            <Text style={[styles.title, { color: 'white', fontSize: 16 }]}>Recruit Cleaners</Text>
-            <Text style={[styles.muted, { color: 'rgba(255,255,255,0.9)', marginTop: 2, fontSize: 12 }]}>
-              Find cleaners to join your team
-            </Text>
-          </TouchableOpacity>
-        </View>
-
 
       </ScrollView>
     </>
