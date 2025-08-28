@@ -8,12 +8,15 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
-  Modal
+  Modal,
+  Alert
 } from 'react-native';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../../utils/firebase';
 import { CleaningJob } from '../../utils/types';
 import { useNavigation } from '@react-navigation/native';
+import ManualCleanForm from '../../components/ManualCleanForm';
+import { Ionicons } from '@expo/vector-icons';
 
 interface CalendarDay {
   date: Date;
@@ -34,6 +37,9 @@ const CleaningCalendarView: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedDay, setSelectedDay] = useState<CalendarDay | null>(null);
   const [showDayModal, setShowDayModal] = useState(false);
+  const [showManualCleanForm, setShowManualCleanForm] = useState(false);
+  const [manualCleanDate, setManualCleanDate] = useState<Date | undefined>(undefined);
+  const [manualCleanAddress, setManualCleanAddress] = useState<string | undefined>(undefined);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -135,10 +141,44 @@ const CleaningCalendarView: React.FC = () => {
 
   const handleDayPress = (day: CalendarDay) => {
     if (day.cleanings.length > 0) {
-      // Show modal with day details
-      setSelectedDay(day);
-      setShowDayModal(true);
+      // Show options: view existing cleans or add manual clean
+      Alert.alert(
+        'Date Options',
+        `This date has ${day.cleanings.length} existing cleaning${day.cleanings.length > 1 ? 's' : ''}. What would you like to do?`,
+        [
+          {
+            text: 'View Existing Cleans',
+            onPress: () => {
+              setSelectedDay(day);
+              setShowDayModal(true);
+            }
+          },
+          {
+            text: 'Add Manual Clean',
+            onPress: () => {
+              setManualCleanDate(day.date);
+              setManualCleanAddress(undefined);
+              setShowManualCleanForm(true);
+            }
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          }
+        ]
+      );
+    } else {
+      // No existing cleans, directly open manual clean form
+      setManualCleanDate(day.date);
+      setManualCleanAddress(undefined);
+      setShowManualCleanForm(true);
     }
+  };
+
+  const handleManualCleanFormClose = () => {
+    setShowManualCleanForm(false);
+    setManualCleanDate(undefined);
+    setManualCleanAddress(undefined);
   };
 
   const handleCleaningPress = (cleaning: CleaningJob) => {
@@ -206,6 +246,21 @@ const CleaningCalendarView: React.FC = () => {
             <Text style={styles.dayNameText}>{dayName}</Text>
           </View>
         ))}
+      </View>
+
+      {/* Manual Clean Button */}
+      <View style={styles.manualCleanButtonContainer}>
+        <TouchableOpacity
+          style={styles.manualCleanButton}
+          onPress={() => {
+            setManualCleanDate(new Date());
+            setManualCleanAddress(undefined);
+            setShowManualCleanForm(true);
+          }}
+        >
+          <Ionicons name="add-circle-outline" size={20} color="white" />
+          <Text style={styles.manualCleanButtonText}>Add Manual Clean</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Calendar Grid */}
@@ -322,7 +377,7 @@ const CleaningCalendarView: React.FC = () => {
       {/* Day Details Modal */}
       <Modal
         visible={showDayModal}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setShowDayModal(false)}
       >
@@ -380,6 +435,14 @@ const CleaningCalendarView: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Manual Clean Form */}
+      <ManualCleanForm
+        visible={showManualCleanForm}
+        onClose={handleManualCleanFormClose}
+        selectedDate={manualCleanDate}
+        selectedAddress={manualCleanAddress}
+      />
     </ScrollView>
   );
 };
@@ -485,9 +548,9 @@ const styles = StyleSheet.create({
   },
   dayCell: {
     width: '14.28%',
-    height: Platform.OS === 'web' ? 50 : 45,
+    height: Platform.OS === 'web' ? 42 : 38,
     borderWidth: 0,
-    padding: 4,
+    padding: 3,
     backgroundColor: 'white',
     justifyContent: 'flex-start',
     alignItems: 'center',
@@ -511,20 +574,21 @@ const styles = StyleSheet.create({
     color: '#0369A1'
   },
   cleaningInfo: {
-    marginTop: 3,
+    marginTop: 2,
     flex: 1,
-    alignItems: 'center'
+    alignItems: 'center',
+    justifyContent: 'flex-start'
   },
   cleaningIndicators: {
     flexDirection: 'row',
-    marginBottom: 2,
+    marginBottom: 1,
     justifyContent: 'center'
   },
   cleaningDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginHorizontal: 1,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 0.5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
@@ -532,30 +596,30 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   moreIndicator: {
-    fontSize: 8,
+    fontSize: 7,
     color: '#1E88E5',
-    marginLeft: 2,
+    marginLeft: 1,
     fontWeight: '700'
   },
   cleaningTime: {
-    fontSize: 8,
+    fontSize: 7,
     color: '#1E88E5',
     fontWeight: '700',
-    marginTop: 1,
+    marginTop: 0.5,
     textAlign: 'center'
   },
   cleanerName: {
-    fontSize: 7,
+    fontSize: 6,
     color: '#64748B',
-    marginTop: 1,
+    marginTop: 0.5,
     fontWeight: '600',
     textAlign: 'center'
   },
   multipleCleanings: {
-    fontSize: 8,
+    fontSize: 7,
     color: '#F59E0B',
     fontWeight: '700',
-    marginTop: 2,
+    marginTop: 1,
     textAlign: 'center'
   },
   upcomingSection: {
@@ -751,6 +815,31 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#1E88E5',
     fontWeight: '600',
+  },
+  // Manual Clean Button styles
+  manualCleanButtonContainer: {
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  manualCleanButton: {
+    backgroundColor: '#10B981',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  manualCleanButtonText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
 

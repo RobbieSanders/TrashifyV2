@@ -11,11 +11,12 @@ import {
   Alert
 } from 'react-native';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
-import { doc, getDoc, collection, query, where, orderBy, onSnapshot, updateDoc, deleteField } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, orderBy, onSnapshot, updateDoc, deleteField, deleteDoc } from 'firebase/firestore';
 import { db } from '../../utils/firebase';
 import { CleaningJob } from '../../utils/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../stores/authStore';
+import { useNotifications } from '../../stores/notificationsStore';
 
 type CleaningDetailRouteProp = RouteProp<{ params: { cleaningJobId: string } }, 'params'>;
 
@@ -35,12 +36,13 @@ const CleaningDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { cleaningJobId } = route.params;
   const { user } = useAuthStore(); // Get current user info
+  const { add: addNotification } = useNotifications();
   
   const [cleaning, setCleaning] = useState<CleaningJob | null>(null);
   const [bookingInfo, setBookingInfo] = useState<BookingInfo | null>(null);
   const [upcomingCleanings, setUpcomingCleanings] = useState<CleaningJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'details' | 'bookings' | 'upcoming'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'bookings'>('details');
 
   useEffect(() => {
     // Set up real-time listener for cleaning details
@@ -226,6 +228,57 @@ const CleaningDetailScreen: React.FC = () => {
     }
   };
 
+  const handleDeleteCleaning = async () => {
+    // Use web-compatible confirmation for web platform
+    const confirmDeletion = Platform.OS === 'web' 
+      ? window.confirm('Are you sure you want to delete this cleaning job? This action cannot be undone.')
+      : await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Delete Cleaning Job',
+            'Are you sure you want to delete this cleaning job? This action cannot be undone.',
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) }
+            ]
+          );
+        });
+
+    if (confirmDeletion) {
+      try {
+        // Check if there's an assigned cleaner to notify
+        const hasAssignedCleaner = cleaning?.assignedCleanerId || cleaning?.assignedCleanerName || cleaning?.cleanerFirstName;
+        const cleanerName = cleaning?.assignedCleanerName || (cleaning?.cleanerFirstName ? `${cleaning.cleanerFirstName} ${cleaning.cleanerLastName}` : null);
+        const cleanerId = cleaning?.assignedCleanerId;
+
+        // Send notification to cleaner if assigned
+        if (hasAssignedCleaner && cleanerId) {
+          const notificationMessage = `Cleaning job at ${cleaning.address} scheduled for ${formatDate(cleaning.preferredDate!)} has been canceled by the host.`;
+          addNotification(cleanerId, notificationMessage);
+        }
+
+        // Delete the cleaning job
+        const jobRef = doc(db, 'cleaningJobs', cleaningJobId);
+        await deleteDoc(jobRef);
+        
+        // Show success message and navigate back
+        if (Platform.OS === 'web') {
+          window.alert('Cleaning job deleted successfully');
+        } else {
+          Alert.alert('Success', 'Cleaning job deleted successfully');
+        }
+        
+        navigation.goBack();
+      } catch (error: any) {
+        const errorMessage = `Failed to delete cleaning job: ${error?.message || 'Unknown error'}`;
+        if (Platform.OS === 'web') {
+          window.alert(errorMessage);
+        } else {
+          Alert.alert('Error', errorMessage);
+        }
+      }
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -293,13 +346,6 @@ const CleaningDetailScreen: React.FC = () => {
           >
             <Ionicons name="bed" size={20} color={activeTab === 'bookings' ? '#1E88E5' : '#64748B'} />
             <Text style={[styles.tabText, activeTab === 'bookings' && styles.activeTabText]}>Bookings</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'upcoming' && styles.activeTab]}
-            onPress={() => setActiveTab('upcoming')}
-          >
-            <Ionicons name="calendar" size={20} color={activeTab === 'upcoming' ? '#1E88E5' : '#64748B'} />
-            <Text style={[styles.tabText, activeTab === 'upcoming' && styles.activeTabText]}>Upcoming</Text>
           </TouchableOpacity>
         </View>
 
@@ -373,6 +419,14 @@ const CleaningDetailScreen: React.FC = () => {
                       </>
                     )}
                   </View>
+                </View>
+                
+                {/* Delete Cleaning Job Button */}
+                <View style={styles.deleteSection}>
+                  <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteCleaning}>
+                    <Ionicons name="trash" size={18} color="#EF4444" />
+                    <Text style={styles.deleteButtonText}>Delete Cleaning Job</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>
@@ -496,48 +550,6 @@ const CleaningDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {activeTab === 'upcoming' && (
-          <View style={styles.content}>
-            {upcomingCleanings.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Ionicons name="calendar-outline" size={48} color="#CBD5E1" />
-                <Text style={styles.emptyStateText}>No upcoming cleanings</Text>
-              </View>
-            ) : (
-              upcomingCleanings.slice(0, 10).map((upcomingCleaning) => (
-                <TouchableOpacity
-                  key={upcomingCleaning.id}
-                  style={styles.upcomingCard}
-                  onPress={() => navigation.push('CleaningDetail', { cleaningJobId: upcomingCleaning.id })}
-                >
-                  <View style={styles.upcomingHeader}>
-                    <Text style={styles.upcomingDate}>
-                      {formatDate(upcomingCleaning.preferredDate!)}
-                    </Text>
-                    <View style={[styles.miniStatusBadge, { backgroundColor: getStatusColor(upcomingCleaning.status) }]}>
-                      <Text style={styles.miniStatusText}>{upcomingCleaning.status}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.upcomingAddress} numberOfLines={1}>
-                    {upcomingCleaning.address}
-                  </Text>
-                  <View style={styles.upcomingFooter}>
-                    <Text style={styles.upcomingTime}>
-                      <Ionicons name="time-outline" size={14} color="#64748B" /> 
-                      {upcomingCleaning.preferredTime || '10:00 AM'}
-                    </Text>
-                    {upcomingCleaning.guestName && (
-                      <Text style={styles.upcomingGuest} numberOfLines={1}>
-                        <Ionicons name="person-outline" size={14} color="#64748B" /> 
-                        {upcomingCleaning.guestName}
-                      </Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -896,6 +908,29 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 16,
     textAlign: 'right'
+  },
+  deleteSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6'
+  },
+  deleteButton: {
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    backgroundColor: '#FEF2F2',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  deleteButtonText: {
+    color: '#EF4444',
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 8
   }
 });
 
