@@ -11,9 +11,11 @@ export declare const fetchICalData: functions.HttpsFunction;
 export declare const syncAllCalendars: functions.CloudFunction<unknown>;
 /**
  * Cleanup: when a property's iCal URL is removed, delete future iCal-based jobs
+ * Uses address instead of propertyId to handle property recreation
  */
 export declare const onPropertyICalRemoved: functions.CloudFunction<functions.Change<functions.firestore.QueryDocumentSnapshot>>;
 /**
- * Cleanup: when a property is deleted, delete all future iCal-based jobs
+ * Cleanup: when a property is deleted, delete all future iCal-based jobs for that address
+ * Uses address to ensure cleanup even if property is recreated
  */
 export declare const onPropertyDeleted: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;

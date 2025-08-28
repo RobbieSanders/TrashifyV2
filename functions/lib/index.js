@@ -277,29 +277,14 @@ async function createCleaningJobsFromEvents(events, propertyId, property, db) {
             .where('status', 'in', ['open', 'bidding', 'accepted', 'scheduled'])
             .get();
         if (existingJobQuery.empty) {
-            // Classify by SUMMARY
-            const summary = (event.summary || '').toLowerCase();
-            const isBlocked = summary.includes('not available') || summary.includes('blocked');
-            const isReserved = summary.includes('reserved'); // treat reserved as a real booking
-            if (isBlocked) {
-                // Skip blocked dates completely
-                console.log('Skipping blocked date from iCal:', event.summary);
+            // Only process events with exactly "Reserved" as the summary
+            // Skip all other events (blocked dates, "Airbnb (Not available)", etc.)
+            if (event.summary !== "Reserved") {
+                console.log(`Skipping non-reservation event: ${event.summary}`);
                 continue;
             }
-            // Extract guest info (fallbacks if name not present)
-            let guestName = 'Guest';
-            if (!isReserved && event.summary) {
-                const nameMatch = event.summary.match(/^([^(]+)/);
-                if (nameMatch) {
-                    guestName = nameMatch[1].trim();
-                }
-                else {
-                    guestName = event.summary.trim();
-                }
-            }
-            else if (isReserved) {
-                guestName = 'Reserved';
-            }
+            // For reserved bookings, use a generic guest name
+            const guestName = 'Reserved Guest';
             const nightsStayed = Math.ceil((event.endDate.getTime() - event.startDate.getTime()) / (1000 * 60 * 60 * 24));
             // Create cleaning job
             const cleaningJobId = db.collection('cleaningJobs').doc().id;
@@ -354,59 +339,68 @@ async function createCleaningJobsFromEvents(events, propertyId, property, db) {
 }
 /**
  * Cleanup: when a property's iCal URL is removed, delete future iCal-based jobs
+ * Uses address instead of propertyId to handle property recreation
  */
 exports.onPropertyICalRemoved = functions.firestore
     .document('properties/{propertyId}')
     .onUpdate(async (change, context) => {
     const before = change.before.data();
     const after = change.after.data();
-    const propertyId = context.params.propertyId;
     const beforeUrl = (before === null || before === void 0 ? void 0 : before.icalUrl) || null;
     const afterUrl = (after === null || after === void 0 ? void 0 : after.icalUrl) || null;
+    const address = (before === null || before === void 0 ? void 0 : before.address) || (after === null || after === void 0 ? void 0 : after.address);
     // Only act when URL was present and now removed/null/empty string
     const removed = beforeUrl && (!afterUrl || String(afterUrl).trim() === '');
-    if (!removed)
+    if (!removed || !address)
         return;
     const db = admin.firestore();
     const nowMs = Date.now();
-    // Fetch all future jobs for this property and delete those created from iCal
+    // Fetch all future jobs for this ADDRESS and delete those created from iCal
     const jobsSnap = await db
         .collection('cleaningJobs')
-        .where('propertyId', '==', propertyId)
+        .where('address', '==', address)
         .where('preferredDate', '>=', nowMs)
         .get();
     const toDelete = jobsSnap.docs.filter((d) => !!d.get('icalEventId') || d.get('source') === 'ical');
     if (!toDelete.length) {
-        console.log(`No iCal jobs to remove for property ${propertyId}`);
+        console.log(`No iCal jobs to remove for address ${address}`);
         return;
     }
     const batch = db.batch();
     toDelete.forEach((doc) => batch.delete(doc.ref));
     await batch.commit();
-    console.log(`Removed ${toDelete.length} iCal-based future jobs for property ${propertyId}`);
+    console.log(`Removed ${toDelete.length} iCal-based future jobs for address ${address}`);
 });
 /**
- * Cleanup: when a property is deleted, delete all future iCal-based jobs
+ * Cleanup: when a property is deleted, delete all future iCal-based jobs for that address
+ * Uses address to ensure cleanup even if property is recreated
  */
 exports.onPropertyDeleted = functions.firestore
     .document('properties/{propertyId}')
     .onDelete(async (snap, context) => {
-    const propertyId = context.params.propertyId;
-    const db = admin.firestore();
-    const nowMs = Date.now();
-    const jobsSnap = await db
-        .collection('cleaningJobs')
-        .where('propertyId', '==', propertyId)
-        .where('preferredDate', '>=', nowMs)
-        .get();
-    const toDelete = jobsSnap.docs.filter((d) => !!d.get('icalEventId') || d.get('source') === 'ical');
-    if (!toDelete.length) {
-        console.log(`No iCal jobs to remove on property delete for ${propertyId}`);
+    const property = snap.data();
+    const address = property === null || property === void 0 ? void 0 : property.address;
+    if (!address) {
+        console.log('No address found for deleted property');
         return;
     }
-    const batch = db.batch();
-    toDelete.forEach((doc) => batch.delete(doc.ref));
-    await batch.commit();
-    console.log(`Removed ${toDelete.length} iCal-based future jobs after property deletion ${propertyId}`);
+    const db = admin.firestore();
+    const nowMs = Date.now();
+    // Delete ALL future cleaning jobs for this address (both iCal and regular)
+    // since the property no longer exists
+    const jobsSnap = await db
+        .collection('cleaningJobs')
+        .where('address', '==', address)
+        .where('preferredDate', '>=', nowMs)
+        .get();
+    if (!jobsSnap.empty) {
+        const batch = db.batch();
+        jobsSnap.docs.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+        console.log(`Removed ${jobsSnap.size} future jobs for deleted property at ${address}`);
+    }
+    else {
+        console.log(`No jobs to remove for deleted property at ${address}`);
+    }
 });
 //# sourceMappingURL=index.js.map

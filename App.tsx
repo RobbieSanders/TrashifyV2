@@ -7,12 +7,12 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 
-import { useAuthStore, initializeAuthListener } from './src/authStore';
-import { useTrashifyStore } from './src/trashifyStore';
-import { useAccountsStore } from './src/accountsStore';
-import { useNotifications } from './src/notificationsStore';
-import { useCleaningJobsStore } from './src/cleaningJobsStore';
-import { Job } from './src/types';
+import { useAuthStore, initializeAuthListener } from './src/stores/authStore';
+import { useTrashifyStore } from './src/stores/trashifyStore';
+import { useAccountsStore } from './src/stores/accountsStore';
+import { useNotifications } from './src/stores/notificationsStore';
+import { useCleaningJobsStore } from './src/stores/cleaningJobsStore';
+import { Job } from './src/utils/types';
 // Remove local auth import - using Firebase now
 import { 
   subscribeJobs, 
@@ -22,20 +22,20 @@ import {
   completeJobFS,
   approveJobFS,
   cancelJobFS 
-} from './src/jobsService';
+} from './src/services/jobsService';
 
 // Load iCal test script for debugging
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
-  import('./src/testIcal.js').catch(console.error);
+  import('./src/scripts/test/testIcal.js').catch(console.error);
 }
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
-import { db } from './src/firebase';
+import { db } from './src/utils/firebase';
 import { 
   geocodeAddressCrossPlatform, 
   searchAddresses, 
   getCurrentLocationAddress,
   FormattedAddress 
-} from './src/geocodingService';
+} from './src/services/geocodingService';
 
 // Use the unified MapComponent that handles platform differences
 import Map, { Polyline, Marker } from './components/MapComponent';
@@ -154,13 +154,15 @@ export default function App() {
 }
 
 // Import AdminDashboard and WorkerSettings
-import { AdminDashboard } from './src/AdminDashboard';
-import WorkerSettings from './src/WorkerSettings';
-import { CleanerScreen } from './src/CleanerScreen';
-import { SearchCleanersScreen } from './src/SearchCleanersScreen';
-import { MyTeamsScreen } from './src/MyTeamsScreen';
-import CleaningCalendarView from './src/CleaningCalendarView';
-import CleaningDetailScreen from './src/CleaningDetailScreen';
+import { AdminDashboard } from './src/screens/admin/AdminDashboard';
+import WorkerSettings from './src/screens/WorkerSettings';
+import { CleanerScreen } from './src/screens/cleaner/CleanerScreen';
+import { SearchCleanersScreen } from './src/screens/cleaner/SearchCleanersScreen';
+import { MyTeamsScreen } from './src/screens/teams/MyTeamsScreen';
+import CleaningCalendarView from './src/screens/cleaning/CleaningCalendarView';
+import CleaningDetailScreen from './src/screens/cleaning/CleaningDetailScreen';
+import AssignCleanerScreen from './src/screens/cleaner/AssignCleanerScreen';
+import { ProfileSettingsScreen } from './src/screens/ProfileSettingsScreen';
 
 // Admin navigation stack
 function AdminStack() {
@@ -185,6 +187,11 @@ function AdminStack() {
         name="CleaningDetail" 
         component={CleaningDetailScreen} 
         options={{ title: 'Cleaning Details' }}
+      />
+      <Stack.Screen 
+        name="AssignCleaner" 
+        component={AssignCleanerScreen} 
+        options={{ title: 'Assign Cleaner' }}
       />
     </Stack.Navigator>
   );
@@ -359,6 +366,14 @@ function HostOnlyStack() {
         })}
       />
       <Stack.Screen 
+        name="AssignCleaner" 
+        component={AssignCleanerScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Assign Cleaner',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
         name="Notifications" 
         component={NotificationsScreen} 
         options={({ navigation }: any) => ({ 
@@ -435,6 +450,14 @@ function HostStack() {
         component={CleaningDetailScreen} 
         options={({ navigation }: any) => ({ 
           title: 'Cleaning Details',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="AssignCleaner" 
+        component={AssignCleanerScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Assign Cleaner',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
@@ -1405,12 +1428,35 @@ function HostHomeScreen({ navigation }: any) {
               </View>
             </View>
             
-            {/* Show next cleaning job */}
-            {cleaningJobs
-              .filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding'))
-              .sort((a, b) => a.preferredDate - b.preferredDate)
-              .slice(0, 1)
-              .map(job => (
+            {/* Get all jobs for the next date that has cleaning jobs */}
+            {(() => {
+              const upcomingJobs = cleaningJobs
+                .filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress'))
+                .sort((a, b) => a.preferredDate - b.preferredDate);
+              
+              if (upcomingJobs.length === 0) return null;
+              
+              // Find the earliest date with jobs
+              const nextCleanDate = upcomingJobs[0].preferredDate;
+              
+              // Get all jobs on that same date
+              const jobsOnNextDate = upcomingJobs.filter(job => {
+                const jobDate = new Date(job.preferredDate);
+                const nextDate = new Date(nextCleanDate);
+                return jobDate.toDateString() === nextDate.toDateString();
+              });
+              
+              // Get remaining jobs after the next clean date
+              const remainingJobs = upcomingJobs.filter(job => {
+                const jobDate = new Date(job.preferredDate);
+                const nextDate = new Date(nextCleanDate);
+                return jobDate.toDateString() !== nextDate.toDateString();
+              });
+
+              return (
+                <>
+                  {/* Show all jobs for the next cleaning date */}
+                  {jobsOnNextDate.map(job => (
               <TouchableOpacity
                 key={job.id} 
                 style={[styles.card, {
@@ -1460,48 +1506,79 @@ function HostHomeScreen({ navigation }: any) {
                   </View>
                 )}
                 
-                {job.assignedCleaner ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="checkmark-circle" size={14} color="#10B981" style={{ marginRight: 6 }} />
-                    <Text style={[styles.muted, { fontSize: 13, color: '#10B981', fontWeight: '600' }]}>
-                      Cleaner assigned: {job.assignedCleaner}
+                <View style={{ 
+                  flexDirection: 'row', 
+                  alignItems: 'center',
+                  marginTop: 8,
+                  paddingTop: 8,
+                  borderTopWidth: 1,
+                  borderTopColor: '#E5E7EB'
+                }}>
+                  <Ionicons 
+                    name="person" 
+                    size={14} 
+                    color={job.assignedCleanerName || job.cleanerFirstName ? '#10B981' : '#64748B'} 
+                    style={{ marginRight: 6 }} 
+                  />
+                  <Text style={{ fontSize: 13, color: '#64748B' }}>
+                    Cleaner: 
+                  </Text>
+                  {(job.assignedCleanerName || job.cleanerFirstName) ? (
+                    <Text style={{ 
+                      fontSize: 13, 
+                      color: '#10B981', 
+                      fontWeight: '600',
+                      marginLeft: 4
+                    }}>
+                      {job.assignedCleanerName || `${job.cleanerFirstName} ${job.cleanerLastName}`}
                     </Text>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    onPress={() => navigation.navigate('SearchCleaners')}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      backgroundColor: '#10B981',
-                      paddingHorizontal: 12,
-                      paddingVertical: 6,
-                      borderRadius: 8,
-                      alignSelf: 'flex-start',
-                      marginTop: 8
-                    }}
-                  >
-                    <Ionicons name="search" size={14} color="white" style={{ marginRight: 4 }} />
-                    <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>Find Cleaner</Text>
-                  </TouchableOpacity>
-                )}
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => navigation.navigate('AssignCleaner', { cleaningJobId: job.id })}
+                      style={{
+                        marginLeft: 4,
+                        flexDirection: 'row',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Text style={{ 
+                        fontSize: 13, 
+                        color: '#1E88E5',
+                        fontWeight: '600',
+                        textDecorationLine: 'underline'
+                      }}>
+                        Not assigned yet
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </TouchableOpacity>
             ))}
+                  
+                  {/* If multiple properties on the same day, show a count */}
+                  {jobsOnNextDate.length > 1 && (
+                    <View style={{
+                      backgroundColor: '#FEF3C7',
+                      borderRadius: 8,
+                      padding: 8,
+                      marginTop: 8,
+                      flexDirection: 'row',
+                      alignItems: 'center'
+                    }}>
+                      <Ionicons name="information-circle" size={14} color="#F59E0B" style={{ marginRight: 6 }} />
+                      <Text style={{ fontSize: 12, color: '#92400E', fontWeight: '600' }}>
+                        {jobsOnNextDate.length} properties to clean on {new Date(nextCleanDate).toLocaleDateString()}
+                      </Text>
+                    </View>
+                  )}
             
-            {/* Show other upcoming cleans */}
-            {cleaningJobs
-              .filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding'))
-              .sort((a, b) => a.preferredDate - b.preferredDate)
-              .slice(1, 3).length > 0 && (
-              <View style={{ marginTop: 8 }}>
-                <Text style={[styles.muted, { fontSize: 11, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }]}>
-                  Other Upcoming Cleans
-                </Text>
-                {cleaningJobs
-                  .filter(j => j.hostId === user?.uid && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding'))
-                  .sort((a, b) => a.preferredDate - b.preferredDate)
-                  .slice(1, 3)
-                  .map(job => (
+                  {/* Show other upcoming cleans (after the next date) */}
+                  {remainingJobs.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={[styles.muted, { fontSize: 11, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }]}>
+                        Other Upcoming Cleans
+                      </Text>
+                      {remainingJobs.slice(0, 3).map(job => (
                   <TouchableOpacity
                     key={job.id} 
                     style={[styles.card, { 
@@ -1523,7 +1600,7 @@ function HostHomeScreen({ navigation }: any) {
                           </Text>
                         )}
                       </View>
-                      {job.assignedCleaner ? (
+                      {(job.assignedCleanerName || job.assignedCleanerId || job.cleanerFirstName) ? (
                         <Ionicons name="checkmark-circle" size={16} color="#10B981" />
                       ) : (
                         <View style={{
@@ -1540,8 +1617,11 @@ function HostHomeScreen({ navigation }: any) {
                     </View>
                   </TouchableOpacity>
                 ))}
-              </View>
-            )}
+                    </View>
+                  )}
+                </>
+              );
+            })()}
           </View>
         )}
 
@@ -1572,7 +1652,7 @@ function HostHomeScreen({ navigation }: any) {
             </Text>
           </TouchableOpacity>
 
-          {/* Post Cleaning Job Button */}
+          {/* Recruit Cleaners Button */}
           <TouchableOpacity
             style={[styles.card, {
               backgroundColor: '#10B981',
@@ -1588,10 +1668,10 @@ function HostHomeScreen({ navigation }: any) {
             }]}
             onPress={() => navigation.navigate('SearchCleaners')}
           >
-            <Ionicons name="sparkles-outline" size={24} color="white" style={{ marginBottom: 6 }} />
-            <Text style={[styles.title, { color: 'white', fontSize: 16 }]}>Post Cleaning Job</Text>
+            <Ionicons name="people-outline" size={24} color="white" style={{ marginBottom: 6 }} />
+            <Text style={[styles.title, { color: 'white', fontSize: 16 }]}>Recruit Cleaners</Text>
             <Text style={[styles.muted, { color: 'rgba(255,255,255,0.9)', marginTop: 2, fontSize: 12 }]}>
-              Get bids from cleaners
+              Find cleaners to join your team
             </Text>
           </TouchableOpacity>
         </View>
@@ -1813,10 +1893,10 @@ function CleanerJobsStack() {
   return (
     <Stack.Navigator>
       <Stack.Screen 
-        name="CleanerJobs" 
+        name="CleanerBidding" 
         component={CleanerScreen} 
         options={({ navigation }: any) => ({ 
-          title: 'Cleaning Jobs',
+          title: 'Join Cleaning Teams',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
@@ -1879,6 +1959,14 @@ function CleanerProfileStack() {
         component={HostProfileScreen} 
         options={({ navigation }: any) => ({ 
           title: 'Profile',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="ProfileSettings" 
+        component={ProfileSettingsScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Profile Settings',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
@@ -2784,6 +2872,24 @@ function HostProfileScreen({ navigation }: any) {
       </View>
 
 
+      {/* Settings Button for Cleaners */}
+      {user?.role === 'cleaner' && (
+        <View style={{ marginHorizontal: 20, marginBottom: 20 }}>
+          <TouchableOpacity
+            style={[styles.button, { 
+              backgroundColor: '#10B981',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }]}
+            onPress={() => navigation.navigate('ProfileSettings')}
+          >
+            <Ionicons name="settings-outline" size={20} color="white" style={{ marginRight: 8 }} />
+            <Text style={styles.buttonText}>Edit Profile & Name</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Sign Out */}
       <View style={{ marginHorizontal: 20, marginBottom: 100 }}>
         <TouchableOpacity
@@ -2804,7 +2910,7 @@ function HostProfileScreen({ navigation }: any) {
 }
 
 // Import the PropertiesScreen from separate file
-import PropertiesScreen from './PropertiesScreen';
+import PropertiesScreen from './src/screens/properties/PropertiesScreen';
 
 // Properties Stack with header
 function PropertiesStack() {
@@ -2815,6 +2921,30 @@ function PropertiesStack() {
         component={PropertiesScreen} 
         options={({ navigation }: any) => ({ 
           title: 'Properties',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="CleaningCalendar" 
+        component={CleaningCalendarView} 
+        options={({ navigation }: any) => ({ 
+          title: 'Cleaning Calendar',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="CleaningDetail" 
+        component={CleaningDetailScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Cleaning Details',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="AssignCleaner" 
+        component={AssignCleanerScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Assign Cleaner',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
@@ -2851,6 +2981,30 @@ function MyTeamsStack() {
         })}
       />
       <Stack.Screen 
+        name="CleaningCalendar" 
+        component={CleaningCalendarView} 
+        options={({ navigation }: any) => ({ 
+          title: 'Cleaning Calendar',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="CleaningDetail" 
+        component={CleaningDetailScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Cleaning Details',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="AssignCleaner" 
+        component={AssignCleanerScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Assign Cleaner',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
         name="Notifications" 
         component={NotificationsScreen} 
         options={({ navigation }: any) => ({ 
@@ -2879,6 +3033,30 @@ function HistoryStack() {
         component={JobListScreen} 
         options={({ navigation }: any) => ({ 
           title: 'History',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="CleaningCalendar" 
+        component={CleaningCalendarView} 
+        options={({ navigation }: any) => ({ 
+          title: 'Cleaning Calendar',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="CleaningDetail" 
+        component={CleaningDetailScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Cleaning Details',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="AssignCleaner" 
+        component={AssignCleanerScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Assign Cleaner',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
