@@ -888,15 +888,15 @@ export default function HostProfileScreenModern({ navigation }: any) {
           ]}
         >
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{String(activeJobs)}</Text>
+            <Text style={styles.statNumber}>{activeJobs}</Text>
             <Text style={styles.statLabel}>Active</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{String(completedJobs)}</Text>
+            <Text style={styles.statNumber}>{completedJobs}</Text>
             <Text style={styles.statLabel}>Complete</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{String(properties.length)}</Text>
+            <Text style={styles.statNumber}>{properties.length}</Text>
             <Text style={styles.statLabel}>Properties</Text>
           </View>
         </Animated.View>
@@ -905,26 +905,26 @@ export default function HostProfileScreenModern({ navigation }: any) {
       {/* Tab Navigation */}
       <View style={styles.tabContainer}>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'overview' && styles.activeTab]}
+          style={[styles.tab, activeTab === 'overview' ? styles.activeTab : null]}
           onPress={() => setActiveTab('overview')}
         >
-          <Text style={[styles.tabText, activeTab === 'overview' && styles.activeTabText]}>
+          <Text style={[styles.tabText, activeTab === 'overview' ? styles.activeTabText : null]}>
             Overview
           </Text>
         </TouchableOpacity>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'properties' && styles.activeTab]}
+          style={[styles.tab, activeTab === 'properties' ? styles.activeTab : null]}
           onPress={() => setActiveTab('properties')}
         >
-          <Text style={[styles.tabText, activeTab === 'properties' && styles.activeTabText]}>
+          <Text style={[styles.tabText, activeTab === 'properties' ? styles.activeTabText : null]}>
             Properties
           </Text>
         </TouchableOpacity>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'settings' && styles.activeTab]}
+          style={[styles.tab, activeTab === 'settings' ? styles.activeTab : null]}
           onPress={() => setActiveTab('settings')}
         >
-          <Text style={[styles.tabText, activeTab === 'settings' && styles.activeTabText]}>
+          <Text style={[styles.tabText, activeTab === 'settings' ? styles.activeTabText : null]}>
             Settings
           </Text>
         </TouchableOpacity>
@@ -932,7 +932,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
       
       {/* Content */}
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {activeTab === 'overview' && (
+        {activeTab === 'overview' ? (
           <Animated.View style={{ opacity: fadeAnim }}>
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Quick Actions</Text>
@@ -943,7 +943,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
                 <Ionicons name="add-circle" size={20} color="#fff" />
                 <Text style={styles.addButtonText}>Add New Property</Text>
               </TouchableOpacity>
-              {properties.some(p => p.icalUrl) && (
+              {properties.some(p => p.icalUrl) ? (
                 <TouchableOpacity 
                   style={[styles.addButton, { backgroundColor: '#00C853', marginTop: 10 }]}
                   onPress={handleSyncAllProperties}
@@ -958,19 +958,19 @@ export default function HostProfileScreenModern({ navigation }: any) {
                     </>
                   )}
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
             
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Recent Activity</Text>
               <Text style={{ color: '#666', fontSize: 14 }}>
-                You have {String(activeJobs)} active jobs and {String(completedJobs)} completed jobs.
+                You have {activeJobs} active jobs and {completedJobs} completed jobs.
               </Text>
             </View>
           </Animated.View>
-        )}
+        ) : null}
         
-        {activeTab === 'properties' && (
+        {activeTab === 'properties' ? (
           <Animated.View style={{ opacity: fadeAnim }}>
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>My Properties</Text>
@@ -996,7 +996,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
                       <View style={styles.propertyInfo}>
                         <Text style={styles.propertyLabel}>{property.label || 'Unnamed Property'}</Text>
                         <Text style={styles.propertyAddress}>{property.address || 'No address'}</Text>
-                        {property.icalUrl && (
+                        {property.icalUrl ? (
                           <TouchableOpacity
                             onPress={() => handleSyncProperty(property)}
                             disabled={isSyncing}
@@ -1021,33 +1021,33 @@ export default function HostProfileScreenModern({ navigation }: any) {
                               {syncingPropertyId === property.id ? 'Syncing...' : 'Sync calendar'}
                             </Text>
                           </TouchableOpacity>
-                        )}
-                        {propertyJobCounts[property.address] > 0 && (
+                        ) : null}
+                        {propertyJobCounts[property.address] > 0 ? (
                           <View style={styles.jobCountContainer}>
                             <Ionicons name="calendar-outline" size={12} color="#64748B" />
                             <Text style={styles.jobCountText}>
-                              {String(propertyJobCounts[property.address])} upcoming cleaning{propertyJobCounts[property.address] !== 1 ? 's' : ''}
+                              {propertyJobCounts[property.address]} upcoming cleaning{propertyJobCounts[property.address] !== 1 ? 's' : ''}
                             </Text>
                           </View>
-                        )}
+                        ) : null}
                       </View>
-                      {property.is_main && (
+                      {property.is_main ? (
                         <View style={styles.mainBadge}>
                           <Text style={styles.mainBadgeText}>Main</Text>
                         </View>
-                      )}
+                      ) : null}
                     </View>
                     
                     <View style={styles.propertyActions}>
-                      {!property.is_main && (
+                      {!property.is_main ? (
                         <TouchableOpacity 
                           style={[styles.actionButton, styles.setMainButton]}
-                          onPress={() => user?.uid && setAsMain(user.uid, property.id)}
+                          onPress={() => { if (user?.uid) setAsMain(user.uid, property.id); }}
                         >
                           <Ionicons name="star-outline" size={16} color="#ff9800" />
                           <Text style={styles.setMainButtonText}>Set Main</Text>
                         </TouchableOpacity>
-                      )}
+                      ) : null}
                       <TouchableOpacity 
                         style={[styles.actionButton, styles.editButton]}
                         onPress={() => handleEditProperty(property)}
@@ -1066,7 +1066,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
                               { 
                                 text: 'Remove', 
                                 style: 'destructive',
-                                onPress: () => user?.uid && removeProperty(user.uid, property.id)
+                                onPress: () => { if (user?.uid) removeProperty(user.uid, property.id); }
                               }
                             ]
                           );
@@ -1089,9 +1089,9 @@ export default function HostProfileScreenModern({ navigation }: any) {
               </TouchableOpacity>
             </View>
           </Animated.View>
-        )}
+        ) : null}
         
-        {activeTab === 'settings' && (
+        {activeTab === 'settings' ? (
           <Animated.View style={{ opacity: fadeAnim }}>
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Personal Information</Text>
@@ -1152,7 +1152,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
               </TouchableOpacity>
             </View>
           </Animated.View>
-        )}
+        ) : null}
       </ScrollView>
       
       {/* Add/Edit Property Modal */}
@@ -1246,7 +1246,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
               </View>
 
               {/* Address suggestions */}
-              {showSuggestions && addressSuggestions.length > 0 && (
+              {showSuggestions && addressSuggestions.length > 0 ? (
                 <View style={styles.suggestionsContainer}>
                   <ScrollView>
                     {addressSuggestions.map((suggestion, index) => {
@@ -1263,7 +1263,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
                           }}
                           style={[
                             styles.suggestionItem,
-                            index === addressSuggestions.length - 1 && { borderBottomWidth: 0 }
+                            index === addressSuggestions.length - 1 ? { borderBottomWidth: 0 } : null
                           ]}
                         >
                           <Text style={styles.suggestionText}>{suggestion}</Text>
@@ -1272,7 +1272,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
                     })}
                   </ScrollView>
                 </View>
-              )}
+              ) : null}
 
               {/* iCal Calendar URL Section */}
               <View style={styles.icalSection}>
@@ -1282,7 +1282,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
                 </View>
                 <Text style={styles.icalHint}>
                   Link your Airbnb or vacation rental calendar to automatically schedule cleanings
-                  {showEditProperty && editingProperty?.icalUrl && ' - Clear this field to remove calendar sync'}
+                  {showEditProperty && editingProperty?.icalUrl ? ' - Clear this field to remove calendar sync' : ''}
                 </Text>
                 <TextInput
                   style={[styles.input, { fontSize: 14 }]}
@@ -1294,22 +1294,22 @@ export default function HostProfileScreenModern({ navigation }: any) {
                   autoCorrect={false}
                   placeholderTextColor="#999"
                 />
-                {icalUrl !== '' && (
+                {icalUrl !== '' ? (
                   <View style={[styles.icalStatusBox, { backgroundColor: '#E3F2FD' }]}>
                     <Ionicons name="checkmark-circle" size={14} color="#1E88E5" />
                     <Text style={[styles.icalStatusText, { color: '#1E88E5' }]}>
                       Calendar will sync automatically every 4 hours
                     </Text>
                   </View>
-                )}
-                {showEditProperty && editingProperty?.icalUrl && icalUrl === '' && (
+                ) : null}
+                {showEditProperty && editingProperty?.icalUrl && icalUrl === '' ? (
                   <View style={[styles.icalStatusBox, { backgroundColor: '#FEF2F2' }]}>
                     <Ionicons name="warning-outline" size={14} color="#EF4444" />
                     <Text style={[styles.icalStatusText, { color: '#EF4444' }]}>
                       Calendar sync will be removed and related cleaning jobs deleted
                     </Text>
                   </View>
-                )}
+                ) : null}
               </View>
             </ScrollView>
             
