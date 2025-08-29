@@ -641,7 +641,18 @@ export function MyTeamsScreen({ navigation }: any) {
   // Get property name for display
   const getPropertyName = (propertyId: string) => {
     const property = properties.find(p => p.id === propertyId);
-    return property?.label || property?.address || 'Unknown Property';
+    // Return null for non-existent properties so they can be filtered out
+    if (!property) return null;
+    return property.label || property.address;
+  };
+  
+  // Filter out orphaned property IDs
+  const getValidPropertyIds = (propertyIds: string[] | undefined) => {
+    if (!propertyIds) return [];
+    return propertyIds.filter(propId => {
+      const property = properties.find(p => p.id === propId);
+      return property !== undefined;
+    });
   };
 
   // Group members by role
@@ -694,23 +705,33 @@ export function MyTeamsScreen({ navigation }: any) {
                     </View>
                     {member.email && <Text style={styles.memberContact}>{member.email}</Text>}
                     {member.phoneNumber && <Text style={styles.memberContact}>{member.phoneNumber}</Text>}
-                    {member.assignedProperties && member.assignedProperties.length > 0 && (
-                      <View style={styles.propertiesChips}>
-                        {member.assignedProperties.slice(0, 2).map(propId => (
-                          <View key={propId} style={styles.propertyChip}>
-                            <Ionicons name="home" size={10} color="#10B981" />
-                            <Text style={styles.propertyChipText}>
-                              {getPropertyName(propId)}
+                    {(() => {
+                      const validProperties = getValidPropertyIds(member.assignedProperties);
+                      if (validProperties.length === 0) return null;
+                      
+                      return (
+                        <View style={styles.propertiesChips}>
+                          {validProperties.slice(0, 2).map(propId => {
+                            const propertyName = getPropertyName(propId);
+                            if (!propertyName) return null;
+                            
+                            return (
+                              <View key={propId} style={styles.propertyChip}>
+                                <Ionicons name="home" size={10} color="#10B981" />
+                                <Text style={styles.propertyChipText}>
+                                  {propertyName}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                          {validProperties.length > 2 && (
+                            <Text style={styles.morePropertiesText}>
+                              +{validProperties.length - 2} more
                             </Text>
-                          </View>
-                        ))}
-                        {member.assignedProperties.length > 2 && (
-                          <Text style={styles.morePropertiesText}>
-                            +{member.assignedProperties.length - 2} more
-                          </Text>
-                        )}
-                      </View>
-                    )}
+                          )}
+                        </View>
+                      );
+                    })()}
                   </View>
                 </View>
                 
@@ -770,23 +791,33 @@ export function MyTeamsScreen({ navigation }: any) {
                     </View>
                     {member.email && <Text style={styles.memberContact}>{member.email}</Text>}
                     {member.phoneNumber && <Text style={styles.memberContact}>{member.phoneNumber}</Text>}
-                    {member.assignedProperties && member.assignedProperties.length > 0 && (
-                      <View style={styles.propertiesChips}>
-                        {member.assignedProperties.slice(0, 2).map(propId => (
-                          <View key={propId} style={styles.propertyChip}>
-                            <Ionicons name="home" size={10} color="#3B82F6" />
-                            <Text style={styles.propertyChipText}>
-                              {getPropertyName(propId)}
+                    {(() => {
+                      const validProperties = getValidPropertyIds(member.assignedProperties);
+                      if (validProperties.length === 0) return null;
+                      
+                      return (
+                        <View style={styles.propertiesChips}>
+                          {validProperties.slice(0, 2).map(propId => {
+                            const propertyName = getPropertyName(propId);
+                            if (!propertyName) return null;
+                            
+                            return (
+                              <View key={propId} style={styles.propertyChip}>
+                                <Ionicons name="home" size={10} color="#3B82F6" />
+                                <Text style={styles.propertyChipText}>
+                                  {propertyName}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                          {validProperties.length > 2 && (
+                            <Text style={styles.morePropertiesText}>
+                              +{validProperties.length - 2} more
                             </Text>
-                          </View>
-                        ))}
-                        {member.assignedProperties.length > 2 && (
-                          <Text style={styles.morePropertiesText}>
-                            +{member.assignedProperties.length - 2} more
-                          </Text>
-                        )}
-                      </View>
-                    )}
+                          )}
+                        </View>
+                      );
+                    })()}
                   </View>
                 </View>
                 

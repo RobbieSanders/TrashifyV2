@@ -164,6 +164,7 @@ import CleaningDetailScreen from './src/screens/cleaning/CleaningDetailScreen';
 import AssignCleanerScreen from './src/screens/cleaner/AssignCleanerScreen';
 import { ProfileSettingsScreen } from './src/screens/ProfileSettingsScreen';
 import { CleeviLogo } from './components/CleeviLogo';
+import HostProfileScreen from './src/screens/HostProfileScreenModern';
 
 // Admin navigation stack
 function AdminStack() {
@@ -219,22 +220,23 @@ function AdminTabs() {
         },
         tabBarIcon: ({ color, size }: { color: string; size: number }) => {
           let icon = 'help';
-          if (route.name === 'Admin') icon = 'shield';
-          else if (route.name === 'Home') icon = 'home';
+          if (route.name === 'Home') icon = 'home';
           else if (route.name === 'Cleaning') icon = 'calendar';
-          else if (route.name === 'Properties') icon = 'business';
+          else if (route.name === 'Handyman Services') icon = 'hammer';
+          else if (route.name === 'Trash Services') icon = 'trash';
           else if (route.name === 'My Teams') icon = 'people';
-          else if (route.name === 'History') icon = 'time';
+          else if (route.name === 'Properties') icon = 'business';
+          else if (route.name === 'More') icon = 'ellipsis-horizontal';
           return <Ionicons name={icon as any} size={size} color={color} />;
         },
       })}
     >
       <Tab.Screen name="Home" component={HostStack} />
       <Tab.Screen name="Cleaning" component={CleaningStack} />
-      <Tab.Screen name="Properties" component={PropertiesStack} />
+      <Tab.Screen name="Handyman Services" component={HandymanServicesStack} />
+      <Tab.Screen name="Trash Services" component={TrashServicesStack} />
       <Tab.Screen name="My Teams" component={MyTeamsStack} />
-      <Tab.Screen name="History" component={HistoryStack} />
-      <Tab.Screen name="Admin" component={AdminStack} options={{ title: 'Admin' }} />
+      <Tab.Screen name="More" component={MoreStack} />
     </Tab.Navigator>
   );
 }
@@ -292,20 +294,20 @@ function HostTabs() {
           let icon = 'help';
           if (route.name === 'Home') icon = 'home';
           else if (route.name === 'Cleaning') icon = 'calendar';
-          else if (route.name === 'Properties') icon = 'business';
+          else if (route.name === 'Handyman Services') icon = 'hammer';
+          else if (route.name === 'Trash Services') icon = 'trash';
           else if (route.name === 'My Teams') icon = 'people';
-          else if (route.name === 'Admin') icon = 'shield';
+          else if (route.name === 'More') icon = 'ellipsis-horizontal';
           return <Ionicons name={icon as any} size={size} color={color} />;
         },
       })}
     >
       <Tab.Screen name="Home" component={HostOnlyStack} />
       <Tab.Screen name="Cleaning" component={CleaningStack} />
-      <Tab.Screen name="Properties" component={PropertiesStack} />
+      <Tab.Screen name="Handyman Services" component={HandymanServicesStack} />
+      <Tab.Screen name="Trash Services" component={TrashServicesStack} />
       <Tab.Screen name="My Teams" component={MyTeamsStack} />
-      {isAdmin && (
-        <Tab.Screen name="Admin" component={AdminStack} options={{ title: 'Admin' }} />
-      )}
+      <Tab.Screen name="More" component={MoreStack} />
     </Tab.Navigator>
   );
 }
@@ -1716,7 +1718,7 @@ function HostHomeScreen({ navigation }: any) {
         </View>
         
         {/* Next Services Section */}
-        {(cleaningJobs.filter(j => j && j.hostId === user?.uid && j.preferredDate && j.preferredDate >= Date.now()).length > 0 || 
+        {(cleaningJobs.filter(j => j && (j.hostId === user?.uid || j.userId === user?.uid) && j.preferredDate && j.preferredDate >= Date.now()).length > 0 || 
           myActiveJobs.length > 0) && (
           <View style={{ marginBottom: 20 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1817,7 +1819,7 @@ function HostHomeScreen({ navigation }: any) {
             {/* Get all jobs for the next date that has cleaning jobs */}
             {(() => {
               const upcomingJobs = cleaningJobs
-                .filter(j => j && j.hostId === user?.uid && j.preferredDate && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress'))
+                .filter(j => j && (j.hostId === user?.uid || j.userId === user?.uid) && j.preferredDate && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress'))
                 .sort((a, b) => a.preferredDate - b.preferredDate);
               
               if (upcomingJobs.length === 0 && myActiveJobs.length === 0) return null;
@@ -3112,300 +3114,8 @@ function WorkerHomeScreen({ navigation }: any) {
   );
 }
 
-// HOST PROFILE SCREEN - Redesigned with better look and feel
-function HostProfileScreen({ navigation }: any) {
-  const user = useAuthStore(s => s.user);
-  const updateProfile = useAuthStore(s => s.updateProfile);
-  const signOut = useAuthStore(s => s.signOut);
-  const jobs = useTrashifyStore(s => s.jobs);
-  const [firstName, setFirstName] = useState(user?.firstName || '');
-  const [lastName, setLastName] = useState(user?.lastName || '');
-  const [phone, setPhone] = useState(user?.phone || '');
-  const [email, setEmail] = useState(user?.email || '');
-  const [isSaving, setIsSaving] = useState(false);
-  
-  // Get stats
-  const completedJobs = jobs.filter(j => j.hostId === user?.uid && j.status === 'completed').length;
-  const activeJobs = jobs.filter(j => j.hostId === user?.uid && (j.status === 'open' || j.status === 'accepted' || j.status === 'in_progress')).length;
-  const totalJobs = jobs.filter(j => j.hostId === user?.uid).length;
 
-  // Update local state when user changes
-  useEffect(() => {
-    if (user) {
-      setFirstName(user.firstName || '');
-      setLastName(user.lastName || '');
-      setPhone(user.phone || '');
-      setEmail(user.email || '');
-    }
-  }, [user]);
-
-  const saveProfile = async () => {
-    if (!user?.uid) return;
-    
-    setIsSaving(true);
-    try {
-      await updateProfile({
-        firstName: firstName.trim() || null,
-        lastName: lastName.trim() || null,
-        phone: phone.trim() || null
-      });
-      
-      Alert.alert('Success', 'Profile updated successfully');
-    } catch (e: any) {
-      console.error('[HostProfileScreen] Error saving profile:', e);
-      Alert.alert('Error', e.message || 'Failed to save profile');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      {/* Profile Header with Gradient Background */}
-      <View style={{
-        backgroundColor: '#1E88E5',
-        paddingTop: 40,
-        paddingBottom: 60,
-        paddingHorizontal: 20,
-      }}>
-        <View style={{ alignItems: 'center' }}>
-          <View style={{
-            width: 100,
-            height: 100,
-            borderRadius: 50,
-            backgroundColor: 'white',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 16,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.2,
-            shadowRadius: 8,
-            elevation: 5,
-          }}>
-            <Ionicons name="person" size={50} color="#1E88E5" />
-          </View>
-          <Text style={{ color: 'white', fontSize: 24, fontWeight: '700' }}>
-            {firstName && lastName ? `${firstName} ${lastName}` : 'Your Name'}
-          </Text>
-          <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 14, marginTop: 4 }}>
-            {user?.email}
-          </Text>
-          <View style={{
-            backgroundColor: 'rgba(255,255,255,0.2)',
-            paddingHorizontal: 12,
-            paddingVertical: 4,
-            borderRadius: 12,
-            marginTop: 8,
-          }}>
-            <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>
-              {user?.role?.toUpperCase() || 'HOST'}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Stats Cards */}
-      <View style={{
-        flexDirection: 'row',
-        marginTop: -30,
-        marginHorizontal: 20,
-        marginBottom: 20,
-      }}>
-        <View style={[styles.card, { 
-          flex: 1, 
-          marginRight: 8,
-          alignItems: 'center',
-          paddingVertical: 20,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 3,
-        }]}>
-          <Text style={{ fontSize: 28, fontWeight: '700', color: '#10B981' }}>{completedJobs}</Text>
-          <Text style={[styles.muted, { fontSize: 12 }]}>Completed</Text>
-        </View>
-        <View style={[styles.card, { 
-          flex: 1, 
-          marginHorizontal: 4,
-          alignItems: 'center',
-          paddingVertical: 20,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 3,
-        }]}>
-          <Text style={{ fontSize: 28, fontWeight: '700', color: '#1E88E5' }}>{activeJobs}</Text>
-          <Text style={[styles.muted, { fontSize: 12 }]}>Active</Text>
-        </View>
-        <View style={[styles.card, { 
-          flex: 1, 
-          marginLeft: 8,
-          alignItems: 'center',
-          paddingVertical: 20,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 3,
-        }]}>
-          <Text style={{ fontSize: 28, fontWeight: '700', color: '#6B7280' }}>{totalJobs}</Text>
-          <Text style={[styles.muted, { fontSize: 12 }]}>Total</Text>
-        </View>
-      </View>
-
-      {/* Personal Information */}
-      <View style={[styles.card, { marginHorizontal: 20, marginBottom: 20, padding: 20 }]}>
-        <Text style={[styles.title, { fontSize: 18, marginBottom: 20 }]}>Personal Information</Text>
-        
-        <View style={{ marginBottom: 16 }}>
-          <Text style={[styles.label, { marginBottom: 8 }]}>First Name</Text>
-          <TextInput
-            style={styles.input}
-            value={firstName}
-            onChangeText={setFirstName}
-            placeholder="Enter your first name"
-          />
-        </View>
-
-        <View style={{ marginBottom: 16 }}>
-          <Text style={[styles.label, { marginBottom: 8 }]}>Last Name</Text>
-          <TextInput
-            style={styles.input}
-            value={lastName}
-            onChangeText={setLastName}
-            placeholder="Enter your last name"
-          />
-        </View>
-
-        <View style={{ marginBottom: 16 }}>
-          <Text style={[styles.label, { marginBottom: 8 }]}>Email</Text>
-          <TextInput
-            style={[styles.input, { backgroundColor: '#F3F4F6' }]}
-            value={email}
-            editable={false}
-            placeholder="Email"
-          />
-        </View>
-
-        <View style={{ marginBottom: 20 }}>
-          <Text style={[styles.label, { marginBottom: 8 }]}>Phone Number</Text>
-          <TextInput
-            style={styles.input}
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="(555) 123-4567"
-            keyboardType="phone-pad"
-          />
-        </View>
-
-        <TouchableOpacity 
-          style={[styles.button, isSaving && { opacity: 0.5 }]} 
-          onPress={saveProfile}
-          disabled={isSaving}
-        >
-          <Text style={styles.buttonText}>{isSaving ? 'Saving...' : 'Save Changes'}</Text>
-        </TouchableOpacity>
-      </View>
-
-
-      {/* Settings Button for Cleaners */}
-      {user?.role === 'cleaner' && (
-        <View style={{ marginHorizontal: 20, marginBottom: 20 }}>
-          <TouchableOpacity
-            style={[styles.button, { 
-              backgroundColor: '#10B981',
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }]}
-            onPress={() => navigation.navigate('ProfileSettings')}
-          >
-            <Ionicons name="settings-outline" size={20} color="white" style={{ marginRight: 8 }} />
-            <Text style={styles.buttonText}>Edit Profile & Name</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Sign Out */}
-      <View style={{ marginHorizontal: 20, marginBottom: 100 }}>
-        <TouchableOpacity
-          style={[styles.button, { 
-            backgroundColor: '#EF4444',
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }]}
-          onPress={() => signOut()}
-        >
-          <Ionicons name="log-out-outline" size={20} color="white" style={{ marginRight: 8 }} />
-          <Text style={styles.buttonText}>Sign Out</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
-  );
-}
-
-// Import the PropertiesScreen from separate file
-import PropertiesScreen from './src/screens/properties/PropertiesScreen';
-
-// Properties Stack with header
-function PropertiesStack() {
-  return (
-    <Stack.Navigator>
-      <Stack.Screen 
-        name="PropertiesMain" 
-        component={PropertiesScreen} 
-        options={({ navigation }: any) => ({ 
-          title: 'Properties',
-          headerRight: () => <HeaderIcons navigation={navigation} />
-        })}
-      />
-      <Stack.Screen 
-        name="CleaningCalendar" 
-        component={CleaningCalendarView} 
-        options={({ navigation }: any) => ({ 
-          title: 'Cleaning Calendar',
-          headerRight: () => <HeaderIcons navigation={navigation} />
-        })}
-      />
-      <Stack.Screen 
-        name="CleaningDetail" 
-        component={CleaningDetailScreen} 
-        options={({ navigation }: any) => ({ 
-          title: 'Cleaning Details',
-          headerRight: () => <HeaderIcons navigation={navigation} />
-        })}
-      />
-      <Stack.Screen 
-        name="AssignCleaner" 
-        component={AssignCleanerScreen} 
-        options={({ navigation }: any) => ({ 
-          title: 'Assign Cleaner',
-          headerRight: () => <HeaderIcons navigation={navigation} />
-        })}
-      />
-      <Stack.Screen 
-        name="Notifications" 
-        component={NotificationsScreen} 
-        options={({ navigation }: any) => ({ 
-          title: 'Notifications',
-          headerRight: () => <HeaderIcons navigation={navigation} />
-        })}
-      />
-      <Stack.Screen 
-        name="HostProfile" 
-        component={HostProfileScreen} 
-        options={({ navigation }: any) => ({ 
-          title: 'Profile',
-          headerRight: () => <HeaderIcons navigation={navigation} />
-        })}
-      />
-    </Stack.Navigator>
-  );
-}
+// Properties functionality has been moved to HostProfileScreen
 
 // My Teams Stack with header
 function MyTeamsStack() {
@@ -3463,39 +3173,95 @@ function MyTeamsStack() {
   );
 }
 
-// History Stack with header
-function HistoryStack() {
+// Handyman Services Stack
+function HandymanServicesStack() {
   return (
     <Stack.Navigator>
       <Stack.Screen 
-        name="HistoryMain" 
-        component={JobListScreen} 
+        name="HandymanServicesMain" 
+        component={HandymanServicesScreen} 
         options={({ navigation }: any) => ({ 
-          title: 'History',
+          title: 'Handyman Services',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
       <Stack.Screen 
-        name="CleaningCalendar" 
-        component={CleaningCalendarView} 
+        name="Notifications" 
+        component={NotificationsScreen} 
         options={({ navigation }: any) => ({ 
-          title: 'Cleaning Calendar',
+          title: 'Notifications',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
       <Stack.Screen 
-        name="CleaningDetail" 
-        component={CleaningDetailScreen} 
+        name="HostProfile" 
+        component={HostProfileScreen} 
         options={({ navigation }: any) => ({ 
-          title: 'Cleaning Details',
+          title: 'Profile',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+    </Stack.Navigator>
+  );
+}
+
+// Trash Services Stack
+function TrashServicesStack() {
+  return (
+    <Stack.Navigator>
+      <Stack.Screen 
+        name="TrashServicesMain" 
+        component={TrashServicesScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Trash Services',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
       <Stack.Screen 
-        name="AssignCleaner" 
-        component={AssignCleanerScreen} 
+        name="Track" 
+        component={TrackScreen} 
         options={({ navigation }: any) => ({ 
-          title: 'Assign Cleaner',
+          title: 'Track Pickup',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="Notifications" 
+        component={NotificationsScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Notifications',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="HostProfile" 
+        component={HostProfileScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'Profile',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+    </Stack.Navigator>
+  );
+}
+
+// More Stack (for additional tabs including Admin)
+function MoreStack() {
+  return (
+    <Stack.Navigator>
+      <Stack.Screen 
+        name="MoreMain" 
+        component={MoreScreen} 
+        options={({ navigation }: any) => ({ 
+          title: 'More',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
+        name="AdminDashboard" 
+        component={AdminDashboard} 
+        options={({ navigation }: any) => ({ 
+          title: 'Admin Dashboard',
           headerRight: () => <HeaderIcons navigation={navigation} />
         })}
       />
@@ -4190,6 +3956,297 @@ function SignUpScreen({ navigation }: any) {
             </Text>
           </TouchableOpacity>
         </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+// NEW SCREEN COMPONENTS
+
+// Handyman Services Screen
+function HandymanServicesScreen({ navigation }: any) {
+  const user = useAuthStore(s => s.user);
+  
+  return (
+    <ScrollView style={[styles.screen, { backgroundColor: '#F3F4F6' }]} contentContainerStyle={{ paddingBottom: 100 }}>
+      <View style={{ marginBottom: 20 }}>
+        <Text style={[styles.title, { fontSize: 24, marginBottom: 8 }]}>Handyman Services</Text>
+        <Text style={[styles.muted, { fontSize: 16 }]}>Professional handyman services for your property</Text>
+      </View>
+
+      {/* Coming Soon Card */}
+      <View style={[styles.card, { alignItems: 'center', padding: 32, marginBottom: 20 }]}>
+        <View style={{
+          backgroundColor: '#8B5CF6',
+          borderRadius: 50,
+          padding: 20,
+          marginBottom: 16,
+        }}>
+          <Ionicons name="hammer" size={40} color="white" />
+        </View>
+        <Text style={[styles.title, { fontSize: 20, marginBottom: 8, textAlign: 'center' }]}>
+          Coming Soon!
+        </Text>
+        <Text style={[styles.muted, { textAlign: 'center', marginBottom: 16 }]}>
+          We're working hard to bring you professional handyman services including:
+        </Text>
+        
+        <View style={{ width: '100%', marginBottom: 20 }}>
+          {[
+            'Plumbing repairs and installations',
+            'Electrical work and fixtures',
+            'Carpentry and furniture assembly',
+            'Painting and touch-ups',
+            'General maintenance and repairs'
+          ].map((service, index) => (
+            <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <Ionicons name="checkmark-circle" size={20} color="#8B5CF6" style={{ marginRight: 12 }} />
+              <Text style={[styles.subtitle, { flex: 1 }]}>{service}</Text>
+            </View>
+          ))}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: '#8B5CF6', paddingHorizontal: 24 }]}
+          onPress={() => Alert.alert('Coming Soon', 'Handyman services will be available soon! We\'ll notify you when they\'re ready.')}
+        >
+          <Text style={styles.buttonText}>Get Notified</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+}
+
+// Trash Services Screen
+function TrashServicesScreen({ navigation }: any) {
+  const user = useAuthStore(s => s.user);
+  const jobs = useTrashifyStore(s => s.jobs);
+  
+  // Get user's trash service jobs
+  const myTrashJobs = jobs.filter(j => j.hostId === user?.uid);
+  const activeJobs = myTrashJobs.filter(j => j.status === 'open' || j.status === 'accepted' || j.status === 'in_progress');
+  const completedJobs = myTrashJobs.filter(j => j.status === 'completed');
+  
+  return (
+    <ScrollView style={[styles.screen, { backgroundColor: '#F3F4F6' }]} contentContainerStyle={{ paddingBottom: 100 }}>
+      <View style={{ marginBottom: 20 }}>
+        <Text style={[styles.title, { fontSize: 24, marginBottom: 8 }]}>Trash Services</Text>
+        <Text style={[styles.muted, { fontSize: 16 }]}>Manage all your trash pickup services</Text>
+      </View>
+
+      {/* Stats Cards */}
+      <View style={{ flexDirection: 'row', marginBottom: 20 }}>
+        <View style={[styles.card, { flex: 1, marginRight: 8, alignItems: 'center', paddingVertical: 16 }]}>
+          <Text style={{ fontSize: 24, fontWeight: '700', color: '#F59E0B' }}>{activeJobs.length}</Text>
+          <Text style={[styles.muted, { fontSize: 12 }]}>Active</Text>
+        </View>
+        <View style={[styles.card, { flex: 1, marginHorizontal: 4, alignItems: 'center', paddingVertical: 16 }]}>
+          <Text style={{ fontSize: 24, fontWeight: '700', color: '#10B981' }}>{completedJobs.length}</Text>
+          <Text style={[styles.muted, { fontSize: 12 }]}>Completed</Text>
+        </View>
+        <View style={[styles.card, { flex: 1, marginLeft: 8, alignItems: 'center', paddingVertical: 16 }]}>
+          <Text style={{ fontSize: 24, fontWeight: '700', color: '#6B7280' }}>{myTrashJobs.length}</Text>
+          <Text style={[styles.muted, { fontSize: 12 }]}>Total</Text>
+        </View>
+      </View>
+
+      {/* Active Jobs Section */}
+      {activeJobs.length > 0 && (
+        <View style={{ marginBottom: 20 }}>
+          <Text style={[styles.title, { fontSize: 18, marginBottom: 12 }]}>Active Pickups</Text>
+          {activeJobs.map(job => (
+            <TouchableOpacity 
+              key={job.id} 
+              style={[styles.card, { 
+                marginBottom: 12,
+                borderLeftWidth: 4,
+                borderLeftColor: job.status === 'open' ? '#F59E0B' : job.status === 'accepted' ? '#3B82F6' : '#10B981'
+              }]}
+              onPress={() => navigation.navigate('Track', { id: job.id })}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600', marginBottom: 4 }]}>
+                    {job.address}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                    <Ionicons 
+                      name={
+                        job.status === 'open' ? 'time-outline' : 
+                        job.status === 'accepted' ? 'checkmark-circle-outline' : 
+                        'navigate-outline'
+                      } 
+                      size={16} 
+                      color={
+                        job.status === 'open' ? '#F59E0B' : 
+                        job.status === 'accepted' ? '#3B82F6' : 
+                        '#10B981'
+                      }
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={[styles.muted, { 
+                      color: 
+                        job.status === 'open' ? '#F59E0B' : 
+                        job.status === 'accepted' ? '#3B82F6' : 
+                        '#10B981',
+                      fontWeight: '600'
+                    }]}>
+                      {job.status === 'open' ? 'Waiting for worker' : 
+                       job.status === 'accepted' ? 'Worker assigned' : 
+                       'In progress'}
+                    </Text>
+                  </View>
+                  {job.notes && (
+                    <Text style={[styles.muted, { fontSize: 13 }]}>Notes: {job.notes}</Text>
+                  )}
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#CBD5E1" />
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Recent Completed Jobs */}
+      {completedJobs.length > 0 && (
+        <View style={{ marginBottom: 20 }}>
+          <Text style={[styles.title, { fontSize: 18, marginBottom: 12 }]}>Recent Completed</Text>
+          {completedJobs.slice(0, 5).map(job => (
+            <View key={job.id} style={[styles.card, { marginBottom: 8, borderLeftWidth: 4, borderLeftColor: '#10B981' }]}>
+              <Text style={[styles.subtitle, { fontWeight: '600' }]}>{job.address}</Text>
+              <Text style={[styles.muted, { fontSize: 12, marginTop: 2 }]}>
+                Completed: {new Date(job.completedAt || job.createdAt).toLocaleDateString()}
+              </Text>
+              {job.notes && (
+                <Text style={[styles.muted, { fontSize: 12, marginTop: 2 }]}>Notes: {job.notes}</Text>
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Empty State */}
+      {myTrashJobs.length === 0 && (
+        <View style={[styles.card, { alignItems: 'center', padding: 32 }]}>
+          <View style={{
+            backgroundColor: '#F59E0B',
+            borderRadius: 50,
+            padding: 20,
+            marginBottom: 16,
+          }}>
+            <Ionicons name="trash" size={40} color="white" />
+          </View>
+          <Text style={[styles.title, { fontSize: 18, marginBottom: 8, textAlign: 'center' }]}>
+            No Trash Services Yet
+          </Text>
+          <Text style={[styles.muted, { textAlign: 'center', marginBottom: 16 }]}>
+            Schedule your first pickup to get started
+          </Text>
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: '#F59E0B' }]}
+            onPress={() => navigation.navigate('Home')}
+          >
+            <Text style={styles.buttonText}>Schedule Pickup</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+// More Screen (for additional options)
+function MoreScreen({ navigation }: any) {
+  const user = useAuthStore(s => s.user);
+  const signOut = useAuthStore(s => s.signOut);
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'manager_admin';
+
+  const menuItems = [
+    ...(isAdmin ? [{
+      title: 'Admin Dashboard',
+      subtitle: 'Manage system settings',
+      icon: 'shield-outline',
+      color: '#EF4444',
+      onPress: () => navigation.navigate('AdminDashboard')
+    }] : [])
+  ];
+
+  return (
+    <ScrollView style={[styles.screen, { backgroundColor: '#F3F4F6' }]} contentContainerStyle={{ paddingBottom: 100 }}>
+      <View style={{ marginBottom: 20 }}>
+        <Text style={[styles.title, { fontSize: 24, marginBottom: 8 }]}>More</Text>
+        <Text style={[styles.muted, { fontSize: 16 }]}>Additional options and settings</Text>
+      </View>
+
+      {/* Menu Items - Only show if there are items */}
+      {menuItems.length > 0 && (
+        <View style={{ marginBottom: 20 }}>
+          {menuItems.map((item, index) => (
+            <TouchableOpacity
+              key={index}
+              style={[styles.card, { 
+                marginBottom: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+                padding: 16
+              }]}
+              onPress={item.onPress}
+            >
+              <View style={{
+                backgroundColor: `${item.color}20`,
+                borderRadius: 12,
+                padding: 12,
+                marginRight: 16,
+              }}>
+                <Ionicons name={item.icon as any} size={24} color={item.color} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600', marginBottom: 2 }]}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.muted, { fontSize: 13 }]}>
+                  {item.subtitle}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#CBD5E1" />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Empty State for non-admin users */}
+      {!isAdmin && (
+        <View style={[styles.card, { alignItems: 'center', padding: 32, marginBottom: 20 }]}>
+          <View style={{
+            backgroundColor: '#E5E7EB',
+            borderRadius: 50,
+            padding: 20,
+            marginBottom: 16,
+          }}>
+            <Ionicons name="ellipsis-horizontal" size={40} color="#6B7280" />
+          </View>
+          <Text style={[styles.title, { fontSize: 18, marginBottom: 8, textAlign: 'center' }]}>
+            All Set!
+          </Text>
+          <Text style={[styles.muted, { textAlign: 'center' }]}>
+            All your main features are available in the other tabs. Additional options will appear here as they become available.
+          </Text>
+        </View>
+      )}
+
+      {/* Sign Out */}
+      <View style={{ marginTop: 20 }}>
+        <TouchableOpacity
+          style={[styles.button, { 
+            backgroundColor: '#EF4444',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }]}
+          onPress={() => signOut()}
+        >
+          <Ionicons name="log-out-outline" size={20} color="white" style={{ marginRight: 8 }} />
+          <Text style={styles.buttonText}>Sign Out</Text>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );

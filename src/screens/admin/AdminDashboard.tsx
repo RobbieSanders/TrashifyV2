@@ -31,6 +31,7 @@ import { db } from '../../utils/firebase';
 import { UserProfile, ActivityLogEntry } from '../../services/userService';
 import { Job, UserStats, ActivityLog } from '../../utils/types';
 import { useAuthStore } from '../../stores/authStore';
+import PropertyCleanupTool from '../../components/PropertyCleanupTool';
 
 interface AdminStats {
   totalHosts: number;
@@ -47,7 +48,7 @@ interface AdminStats {
 
 export function AdminDashboard({ navigation }: any) {
   const currentUser = useAuthStore(s => s.user);
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'jobs' | 'reports' | 'activity'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'jobs' | 'reports' | 'activity' | 'tools'>('overview');
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [stats, setStats] = useState<AdminStats>({
@@ -77,11 +78,15 @@ export function AdminDashboard({ navigation }: any) {
   const canDeleteUsers = isSuper;
   const canChangeRoles = isSuper;
 
+  // Initial data load
   useEffect(() => {
-    // Initial load
     loadData();
+  }, []); // Only run once on mount
+  
+  // Set up real-time listener for cleaning jobs
+  useEffect(() => {
+    if (!db) return;
     
-    // Set up real-time listener for cleaning jobs
     const cleaningJobsUnsubscribe = onSnapshot(
       collection(db, 'cleaningJobs'),
       (snapshot) => {
@@ -90,11 +95,6 @@ export function AdminDashboard({ navigation }: any) {
           id: doc.id
         } as Job));
         setJobs(jobsData);
-        
-        // Recalculate stats with new jobs data
-        if (users.length > 0) {
-          calculateStats(users, jobsData);
-        }
       },
       (error) => {
         console.error('Error listening to cleaning jobs:', error);
@@ -105,7 +105,14 @@ export function AdminDashboard({ navigation }: any) {
     return () => {
       cleaningJobsUnsubscribe();
     };
-  }, [users]); // Re-run when users change to recalculate stats
+  }, []); // Only set up listener once
+  
+  // Recalculate stats when users or jobs change
+  useEffect(() => {
+    if (users.length > 0 && jobs.length >= 0) {
+      calculateStats(users, jobs);
+    }
+  }, [users, jobs]); // Recalculate when either changes
 
   const loadData = async () => {
     setLoading(true);
@@ -558,6 +565,16 @@ export function AdminDashboard({ navigation }: any) {
             Activity
           </Text>
         </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'tools' && styles.activeTab]}
+          onPress={() => setActiveTab('tools')}
+        >
+          <Ionicons name="settings" size={20} color={activeTab === 'tools' ? '#1E88E5' : '#64748B'} />
+          <Text style={[styles.tabText, activeTab === 'tools' && styles.activeTabText]}>
+            Tools
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {activeTab === 'overview' && renderOverview()}
@@ -581,6 +598,12 @@ export function AdminDashboard({ navigation }: any) {
             </View>
           )}
         />
+      )}
+      {activeTab === 'tools' && (
+        <ScrollView style={styles.tabContent}>
+          <Text style={styles.sectionTitle}>Admin Tools</Text>
+          <PropertyCleanupTool />
+        </ScrollView>
       )}
 
       {selectedUser && (

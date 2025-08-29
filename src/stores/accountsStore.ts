@@ -257,6 +257,8 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
       const property = properties.find(p => p.id === propertyId);
       const address = property?.address;
       
+      console.log(`[accountsStore] Starting cascade deletion for property: ${propertyId}, address: ${address}`);
+      
       // Delete the property document
       await deleteDoc(doc(db, 'properties', propertyId));
       
@@ -265,12 +267,14 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
         properties: state.properties.filter(p => p.id !== propertyId)
       }));
       
-      // If address exists, trigger a manual cleanup of cleaning jobs
-      // This helps ensure UI updates immediately
+      // If address exists, trigger a comprehensive cleanup
       if (address) {
-        const { query, where, getDocs, deleteDoc: deleteFirestoreDoc } = await import('firebase/firestore');
+        const { query, where, getDocs, deleteDoc: deleteFirestoreDoc, writeBatch } = await import('firebase/firestore');
+        const batch = writeBatch(db);
+        let totalDeleted = 0;
+        
+        // 1. Clean up ALL cleaning jobs (not just future ones)
         const cleaningJobsRef = collection(db, 'cleaningJobs');
-        // Simple query by address only to avoid index requirement
         const jobsQuery = query(
           cleaningJobsRef,
           where('address', '==', address)
@@ -278,23 +282,188 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
         
         try {
           const snapshot = await getDocs(jobsQuery);
-          const currentTime = Date.now();
-          // Filter future jobs locally
-          const futureJobs = snapshot.docs.filter(doc => {
-            const data = doc.data();
-            return data.preferredDate >= currentTime;
+          console.log(`[accountsStore] Found ${snapshot.size} cleaning jobs to delete`);
+          
+          // Delete ALL jobs for this address to prevent orphaned data
+          snapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+            totalDeleted++;
           });
-          const deletions = futureJobs.map(doc => deleteFirestoreDoc(doc.ref));
-          await Promise.all(deletions);
-          console.log(`[accountsStore] Deleted ${futureJobs.length} cleaning jobs for address:`, address);
+          
+          // Also get job IDs for cleaning up bids
+          const jobIds = snapshot.docs.map(doc => doc.id);
+          
+          // Clean up any bids related to these jobs
+          if (jobIds.length > 0) {
+            const bidsRef = collection(db, 'bids');
+            for (const jobId of jobIds) {
+              const bidsQuery = query(bidsRef, where('jobId', '==', jobId));
+              const bidsSnapshot = await getDocs(bidsQuery);
+              bidsSnapshot.docs.forEach(bidDoc => {
+                batch.delete(bidDoc.ref);
+                totalDeleted++;
+              });
+            }
+            console.log(`[accountsStore] Deleted bids for ${jobIds.length} jobs`);
+          }
         } catch (cleanupError) {
           console.error('[accountsStore] Error cleaning up jobs:', cleanupError);
         }
+        
+        // 2. Clean up team members that reference this property
+        const teamMembersRef = collection(db, 'teamMembers');
+        const teamQuery = query(
+          teamMembersRef,
+          where('hostId', '==', userId)
+        );
+        
+        try {
+          const teamSnapshot = await getDocs(teamQuery);
+          console.log(`[accountsStore] Checking ${teamSnapshot.size} team members for property references`);
+          
+          for (const teamDoc of teamSnapshot.docs) {
+            const teamData = teamDoc.data();
+            let needsUpdate = false;
+            let updates: any = {};
+            
+            // Clean assignedProperties array
+            if (teamData.assignedProperties && Array.isArray(teamData.assignedProperties)) {
+              const remainingProperties = teamData.assignedProperties.filter(
+                (prop: any) => prop !== address && prop.address !== address
+              );
+              
+              if (remainingProperties.length !== teamData.assignedProperties.length) {
+                updates.assignedProperties = remainingProperties;
+                needsUpdate = true;
+                console.log(`[accountsStore] Removing property from team member ${teamDoc.id} assignedProperties`);
+              }
+            }
+            
+            // Clean properties array
+            if (teamData.properties && Array.isArray(teamData.properties)) {
+              const remainingProperties = teamData.properties.filter(
+                (prop: any) => {
+                  if (typeof prop === 'string') return prop !== address;
+                  return prop.address !== address;
+                }
+              );
+              
+              if (remainingProperties.length !== teamData.properties.length) {
+                updates.properties = remainingProperties;
+                needsUpdate = true;
+                console.log(`[accountsStore] Removing property from team member ${teamDoc.id} properties`);
+              }
+            }
+            
+            // Clean any address field that matches
+            if (teamData.address === address) {
+              updates.address = null;
+              needsUpdate = true;
+              console.log(`[accountsStore] Clearing address field for team member ${teamDoc.id}`);
+            }
+            
+            if (needsUpdate) {
+              await updateDoc(teamDoc.ref, updates);
+            }
+          }
+        } catch (teamError) {
+          console.error('[accountsStore] Error cleaning up team members:', teamError);
+        }
+        
+        // 3. Clean up recruitment posts that reference this property
+        const recruitmentsRef = collection(db, 'cleanerRecruitments');
+        const recruitmentsQuery = query(
+          recruitmentsRef,
+          where('hostId', '==', userId)
+        );
+        
+        try {
+          const recruitmentsSnapshot = await getDocs(recruitmentsQuery);
+          console.log(`[accountsStore] Checking ${recruitmentsSnapshot.size} recruitment posts`);
+          
+          for (const recruitmentDoc of recruitmentsSnapshot.docs) {
+            const recruitmentData = recruitmentDoc.data();
+            
+            // Check if this recruitment contains the deleted property
+            if (recruitmentData.properties && Array.isArray(recruitmentData.properties)) {
+              const remainingProperties = recruitmentData.properties.filter(
+                (prop: any) => prop.address !== address
+              );
+              
+              // If properties were removed, update or delete the recruitment
+              if (remainingProperties.length !== recruitmentData.properties.length) {
+                if (remainingProperties.length === 0) {
+                  // Delete the recruitment if no properties remain
+                  batch.delete(recruitmentDoc.ref);
+                  totalDeleted++;
+                  console.log(`[accountsStore] Deleted recruitment ${recruitmentDoc.id} (no properties remaining)`);
+                } else {
+                  // Update the recruitment with remaining properties
+                  await updateDoc(recruitmentDoc.ref, {
+                    properties: remainingProperties
+                  });
+                  console.log(`[accountsStore] Updated recruitment ${recruitmentDoc.id} (removed property)`);
+                }
+              }
+            }
+          }
+        } catch (recruitmentError) {
+          console.error('[accountsStore] Error cleaning up recruitment posts:', recruitmentError);
+        }
+        
+        // 4. Clean up ALL pickup jobs (not just future ones)
+        const pickupJobsRef = collection(db, 'pickupJobs');
+        const pickupJobsQuery = query(
+          pickupJobsRef,
+          where('pickup_address', '==', address)
+        );
+        
+        try {
+          const pickupSnapshot = await getDocs(pickupJobsQuery);
+          console.log(`[accountsStore] Found ${pickupSnapshot.size} pickup jobs to delete`);
+          
+          // Delete ALL pickup jobs for this address
+          pickupSnapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+            totalDeleted++;
+          });
+        } catch (pickupError) {
+          console.error('[accountsStore] Error cleaning up pickup jobs:', pickupError);
+        }
+        
+        // 5. Clean up worker history references
+        const workerHistoryRef = collection(db, 'worker_history');
+        const historyQuery = query(
+          workerHistoryRef,
+          where('address', '==', address)
+        );
+        
+        try {
+          const historySnapshot = await getDocs(historyQuery);
+          console.log(`[accountsStore] Found ${historySnapshot.size} worker history entries`);
+          
+          // Update worker history to mark as deleted property
+          for (const historyDoc of historySnapshot.docs) {
+            await updateDoc(historyDoc.ref, {
+              address: `${address} (deleted property)`,
+              property_deleted: true
+            });
+          }
+        } catch (historyError) {
+          console.error('[accountsStore] Error updating worker history:', historyError);
+        }
+        
+        // Commit all deletes in batch
+        if (totalDeleted > 0) {
+          await batch.commit();
+          console.log(`[accountsStore] Cascade deletion complete. Total items deleted: ${totalDeleted}`);
+        }
       }
       
-      console.log('[accountsStore] Removed property:', propertyId);
+      console.log(`[accountsStore] Successfully removed property ${propertyId} and all related data`);
     } catch (error) {
       console.error('[accountsStore] Error removing property:', error);
+      throw error; // Re-throw to let UI handle the error
     }
   },
 
