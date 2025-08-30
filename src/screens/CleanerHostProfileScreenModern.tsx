@@ -37,6 +37,8 @@ import {
 import { db } from '../utils/firebase';
 import { geocodeAddressCrossPlatform } from '../services/geocodingService';
 import { geocodeAddressWithFallback } from '../services/googleGeocodingService';
+import { getCleanerBidHistory, withdrawBid, subscribeToFilteredRecruitments } from '../services/cleanerRecruitmentService';
+import { CleanerBid, CleanerRecruitment } from '../utils/types';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -86,6 +88,13 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
   
   // Modal states
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  
+  // Application cards states
+  const [myBids, setMyBids] = useState<CleanerBid[]>([]);
+  const [loadingBids, setLoadingBids] = useState(true);
+  const [showApplicationModal, setShowApplicationModal] = useState(false);
+  const [selectedApplication, setSelectedApplication] = useState<CleanerBid | null>(null);
+  const [openRecruitments, setOpenRecruitments] = useState<CleanerRecruitment[]>([]);
   
   // Get cleaner-specific stats from assigned cleaning jobs
   const assignedJobs = allJobs.filter(job => 
@@ -175,12 +184,64 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
     if (user?.uid) {
       loadCleanerData();
       subscribeToAllJobs(user.uid);
+      loadBidHistory();
     }
     
     return () => {
       clearAllSubscriptions();
     };
   }, [user?.uid]);
+
+  // Subscribe to recruitment data for application details
+  useEffect(() => {
+    if (!user?.uid) return;
+    
+    const unsubscribe = subscribeToFilteredRecruitments(user.uid, (recruitments) => {
+      setOpenRecruitments(recruitments);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  // Load cleaner's bid history
+  const loadBidHistory = async () => {
+    if (!user?.uid) return;
+
+    try {
+      const bids = await getCleanerBidHistory(user.uid);
+      setMyBids(bids);
+    } catch (error) {
+      console.error('Error loading bid history:', error);
+    } finally {
+      setLoadingBids(false);
+    }
+  };
+
+  // Handle withdrawing a bid
+  const handleWithdrawBid = async (recruitmentId: string, bidId: string) => {
+    Alert.alert(
+      'Withdraw Application',
+      'Are you sure you want to withdraw your application?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Withdraw',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await withdrawBid(recruitmentId, bidId);
+              Alert.alert('Success', 'Your application has been withdrawn');
+              // Reload bid history
+              loadBidHistory();
+            } catch (error) {
+              console.error('Error withdrawing bid:', error);
+              Alert.alert('Error', 'Failed to withdraw application');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   // Load cleaner-specific data
   const loadCleanerData = async () => {
@@ -1085,6 +1146,194 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       backgroundColor: '#10B981',
       borderRadius: 3,
     },
+    // Application cards styles
+    viewAllButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      backgroundColor: '#F1F5F9',
+      borderRadius: 6,
+    },
+    viewAllText: {
+      fontSize: 13,
+      color: '#475569',
+      fontWeight: '600',
+    },
+    horizontalScroll: {
+      marginHorizontal: -20,
+      paddingHorizontal: 20,
+    },
+    applicationCard: {
+      backgroundColor: 'white',
+      borderRadius: 12,
+      padding: 12,
+      marginRight: 12,
+      minWidth: 120,
+      borderWidth: 1,
+      borderColor: '#E2E8F0',
+    },
+    applicationStatus: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 6,
+      marginBottom: 8,
+    },
+    statusPending: {
+      backgroundColor: '#F59E0B',
+    },
+    statusAccepted: {
+      backgroundColor: '#10B981',
+    },
+    statusRejected: {
+      backgroundColor: '#EF4444',
+    },
+    statusWithdrawn: {
+      backgroundColor: '#64748B',
+    },
+    applicationStatusText: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: 'white',
+      marginLeft: 4,
+    },
+    applicationAmount: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: '#0F172A',
+      marginBottom: 4,
+    },
+    applicationAmountSuffix: {
+      fontSize: 12,
+      color: '#64748B',
+      fontWeight: '400',
+    },
+    applicationDate: {
+      fontSize: 11,
+      color: '#64748B',
+      marginBottom: 8,
+    },
+    withdrawButton: {
+      backgroundColor: '#FEE2E2',
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+      borderRadius: 6,
+    },
+    withdrawButtonText: {
+      fontSize: 11,
+      color: '#EF4444',
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    // Application modal styles
+    applicationDetailCard: {
+      backgroundColor: 'white',
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: '#E2E8F0',
+    },
+    applicationDetailRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: '#F1F5F9',
+    },
+    applicationDetailLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#334155',
+    },
+    applicationDetailValue: {
+      fontSize: 14,
+      color: '#0F172A',
+      fontWeight: '500',
+    },
+    applicationMessageSection: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: '#F1F5F9',
+    },
+    applicationMessage: {
+      fontSize: 14,
+      color: '#475569',
+      lineHeight: 20,
+      marginTop: 6,
+      backgroundColor: '#F8FAFC',
+      padding: 12,
+      borderRadius: 8,
+    },
+    withdrawModalButton: {
+      backgroundColor: '#EF4444',
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+      marginTop: 16,
+    },
+    withdrawModalButtonText: {
+      color: 'white',
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    // Property details styles for modal
+    propertyDetailsGrid: {
+      marginBottom: 8,
+    },
+    propertyDetailCard: {
+      backgroundColor: 'white',
+      borderRadius: 8,
+      padding: 8,
+      marginBottom: 6,
+      borderWidth: 1,
+      borderColor: '#E2E8F0',
+    },
+    propertyDetailSpecs: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    propertySpec: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#F1F5F9',
+      paddingHorizontal: 6,
+      paddingVertical: 3,
+      borderRadius: 4,
+    },
+    propertySpecText: {
+      fontSize: 10,
+      color: '#334155',
+      marginLeft: 4,
+      fontWeight: '600',
+    },
+    // Responsibility styles for modal
+    responsibilitiesHorizontal: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    responsibilityItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginRight: 16,
+      marginBottom: 4,
+    },
+    responsibilityText: {
+      fontSize: 11,
+      marginLeft: 6,
+      fontWeight: '500',
+    },
+    responsibilityIncluded: {
+      color: '#166534',
+    },
+    responsibilityNotIncluded: {
+      color: '#991B1B',
+    },
+    responsibilityStrikethrough: {
+      textDecorationLine: 'line-through',
+    },
   });
 
   return (
@@ -1209,28 +1458,93 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
         {activeTab === 'overview' ? (
           <Animated.View style={{ opacity: fadeAnim }}>
             <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Pending Bids</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <Text style={styles.sectionTitle}>Pending Bids</Text>
+                {!loadingBids && myBids.length > 0 && myBids.some(bid => bid.recruitmentId) && (
+                  <TouchableOpacity style={styles.viewAllButton}>
+                    <Text style={styles.viewAllText}>View All</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
               
-              {pendingBids.length === 0 ? (
+              {pendingBids.length === 0 && (!myBids.length || !myBids.some(bid => bid.recruitmentId)) ? (
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIcon}>
                     <Ionicons name="document-text-outline" size={40} color="#999" />
                   </View>
-                  <Text style={styles.emptyText}>No pending bids</Text>
-                  <Text style={styles.emptySubtext}>New bid opportunities will appear here</Text>
+                  <Text style={styles.emptyText}>No pending bids or applications</Text>
+                  <Text style={styles.emptySubtext}>New bid opportunities and applications will appear here</Text>
                 </View>
               ) : (
-                pendingBids.map((bid) => (
-                  <View key={bid.id} style={styles.bidCard}>
-                    <View style={styles.propertyHeader}>
-                      <View style={styles.propertyInfo}>
-                        <Text style={styles.bidAmount}>${bid.bidAmount || 0}</Text>
-                        <Text style={styles.propertyAddress}>{bid.propertyAddress}</Text>
-                        <Text style={styles.bidStatus}>Pending Response</Text>
+                <>
+                  {pendingBids.map((bid) => (
+                    <View key={bid.id} style={styles.bidCard}>
+                      <View style={styles.propertyHeader}>
+                        <View style={styles.propertyInfo}>
+                          <Text style={styles.bidAmount}>${bid.bidAmount || 0}</Text>
+                          <Text style={styles.propertyAddress}>{bid.propertyAddress}</Text>
+                          <Text style={styles.bidStatus}>Pending Response</Text>
+                        </View>
                       </View>
                     </View>
-                  </View>
-                ))
+                  ))}
+
+                  {/* Application Cards integrated into Pending Bids */}
+                  {!loadingBids && myBids.length > 0 && myBids.some(bid => bid.recruitmentId) && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.horizontalScroll, { marginTop: 4 }]}>
+                        {myBids
+                          .filter(bid => bid.recruitmentId)
+                          .slice(0, 5)
+                          .map(bid => (
+                          <TouchableOpacity 
+                            key={bid.id} 
+                            style={styles.applicationCard}
+                            onPress={() => {
+                              setSelectedApplication(bid);
+                              setShowApplicationModal(true);
+                            }}
+                          >
+                            <View style={[styles.applicationStatus,
+                              bid.status === 'accepted' && styles.statusAccepted,
+                              bid.status === 'rejected' && styles.statusRejected,
+                              bid.status === 'pending' && styles.statusPending,
+                              bid.status === 'withdrawn' && styles.statusWithdrawn
+                            ]}>
+                              <Ionicons 
+                                name={
+                                  bid.status === 'accepted' ? 'checkmark-circle' :
+                                  bid.status === 'rejected' ? 'close-circle' :
+                                  bid.status === 'pending' ? 'time' : 'remove-circle'
+                                } 
+                                size={12} 
+                                color="white" 
+                              />
+                              <Text style={styles.applicationStatusText}>
+                                {bid.status === 'pending' ? 'Under Review' : bid.status.charAt(0).toUpperCase() + bid.status.slice(1)}
+                              </Text>
+                            </View>
+                            <Text style={styles.applicationAmount}>
+                              ${bid.flatFee || 0}<Text style={styles.applicationAmountSuffix}>/job</Text>
+                            </Text>
+                            <Text style={styles.applicationDate}>
+                              Applied {new Date(bid.bidDate).toLocaleDateString()}
+                            </Text>
+                            {bid.status === 'pending' && (
+                              <TouchableOpacity
+                                style={styles.withdrawButton}
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  handleWithdrawBid(bid.recruitmentId, bid.id);
+                                }}
+                              >
+                                <Text style={styles.withdrawButtonText}>Withdraw</Text>
+                              </TouchableOpacity>
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                  )}
+                </>
               )}
             </View>
             
@@ -1709,6 +2023,216 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Application Details Modal */}
+      <Modal
+        visible={showApplicationModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowApplicationModal(false)}
+      >
+        <View style={styles.modal}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Application Details</Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowApplicationModal(false)}
+              >
+                <Ionicons name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {selectedApplication && (() => {
+                // Find the recruitment data for this application
+                const recruitment = openRecruitments.find(r => r.id === selectedApplication.recruitmentId);
+                
+                return (
+                  <>
+                    <View style={styles.applicationDetailCard}>
+                      <View style={[styles.applicationStatus,
+                        selectedApplication.status === 'accepted' && styles.statusAccepted,
+                        selectedApplication.status === 'rejected' && styles.statusRejected,
+                        selectedApplication.status === 'pending' && styles.statusPending,
+                        selectedApplication.status === 'withdrawn' && styles.statusWithdrawn
+                      ]}>
+                        <Ionicons 
+                          name={
+                            selectedApplication.status === 'accepted' ? 'checkmark-circle' :
+                            selectedApplication.status === 'rejected' ? 'close-circle' :
+                            selectedApplication.status === 'pending' ? 'time' : 'remove-circle'
+                          } 
+                          size={16} 
+                          color="white" 
+                        />
+                        <Text style={[styles.applicationStatusText, { fontSize: 14 }]}>
+                          {selectedApplication.status === 'pending' ? 'Under Review' : 
+                           selectedApplication.status.charAt(0).toUpperCase() + selectedApplication.status.slice(1)}
+                        </Text>
+                      </View>
+
+                      <View style={styles.applicationDetailRow}>
+                        <Text style={styles.applicationDetailLabel}>Rate:</Text>
+                        <Text style={styles.applicationDetailValue}>
+                          ${selectedApplication.flatFee || 0}/job
+                        </Text>
+                      </View>
+
+                      <View style={styles.applicationDetailRow}>
+                        <Text style={styles.applicationDetailLabel}>Applied:</Text>
+                        <Text style={styles.applicationDetailValue}>
+                          {new Date(selectedApplication.bidDate).toLocaleDateString()}
+                        </Text>
+                      </View>
+
+                      {recruitment && (
+                        <>
+                          <View style={styles.applicationDetailRow}>
+                            <Text style={styles.applicationDetailLabel}>Turnovers/Month:</Text>
+                            <Text style={styles.applicationDetailValue}>
+                              {recruitment.estimatedTurnoversPerMonth === 11 ? '11+' : recruitment.estimatedTurnoversPerMonth || 1}
+                            </Text>
+                          </View>
+
+                          {recruitment.estimatedCleaningTimeHours && (
+                            <View style={styles.applicationDetailRow}>
+                              <Text style={styles.applicationDetailLabel}>Hours per Clean:</Text>
+                              <Text style={styles.applicationDetailValue}>
+                                {recruitment.estimatedCleaningTimeHours === 11 ? '11h+' : `${recruitment.estimatedCleaningTimeHours}h`}
+                              </Text>
+                            </View>
+                          )}
+                        </>
+                      )}
+
+                      {/* Property Details */}
+                      {recruitment && recruitment.properties && recruitment.properties.length > 0 && (
+                        <View style={styles.applicationMessageSection}>
+                          <Text style={styles.applicationDetailLabel}>Property Details:</Text>
+                          <View style={styles.propertyDetailsGrid}>
+                            {recruitment.properties.map((property, index) => {
+                              const bedrooms = property.bedrooms ?? property.beds;
+                              const bathrooms = property.bathrooms;
+                              let sqft = property.unitSize;
+                              let isEstimated = false;
+                              if (!sqft && bedrooms && bathrooms) {
+                                sqft = 400 + (bedrooms * 200) + (bathrooms * 100);
+                                isEstimated = true;
+                              } else if (!sqft) {
+                                sqft = 800;
+                                isEstimated = true;
+                              }
+                              
+                              return (
+                                <View key={index} style={styles.propertyDetailCard}>
+                                  <View style={styles.propertyDetailSpecs}>
+                                    <View style={styles.propertySpec}>
+                                      <Ionicons name="home" size={12} color="#1E88E5" />
+                                      <Text style={styles.propertySpecText}>
+                                        {bedrooms !== undefined && bedrooms !== null ? bedrooms : 'N/A'} bedroom{(bedrooms || 0) !== 1 ? 's' : ''}
+                                      </Text>
+                                    </View>
+                                    <View style={styles.propertySpec}>
+                                      <Ionicons name="water" size={12} color="#1E88E5" />
+                                      <Text style={styles.propertySpecText}>
+                                        {bathrooms !== undefined && bathrooms !== null ? bathrooms : 'N/A'} bath{(bathrooms || 0) !== 1 ? 's' : ''}
+                                      </Text>
+                                    </View>
+                                    <View style={styles.propertySpec}>
+                                      <Ionicons name="bed" size={12} color="#1E88E5" />
+                                      <Text style={styles.propertySpecText}>
+                                        {property.beds !== undefined && property.beds !== null ? property.beds : 'N/A'} bed{(property.beds || 0) !== 1 ? 's' : ''}
+                                      </Text>
+                                    </View>
+                                    <View style={styles.propertySpec}>
+                                      <Ionicons name="resize" size={12} color="#1E88E5" />
+                                      <Text style={styles.propertySpecText}>
+                                        {sqft} sq ft{isEstimated ? '?' : ''}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Cleaner Responsibilities */}
+                      {recruitment && (
+                        <View style={styles.applicationMessageSection}>
+                          <Text style={styles.applicationDetailLabel}>Cleaner Responsibilities:</Text>
+                          <View style={styles.responsibilitiesHorizontal}>
+                            <View style={styles.responsibilityItem}>
+                              <Ionicons 
+                                name={recruitment.cleanerWillProvideSupplies ? "checkmark-circle" : "close-circle"} 
+                                size={14} 
+                                color={recruitment.cleanerWillProvideSupplies ? "#10B981" : "#EF4444"} 
+                              />
+                              <Text style={[
+                                styles.responsibilityText, 
+                                recruitment.cleanerWillProvideSupplies ? styles.responsibilityIncluded : styles.responsibilityNotIncluded,
+                                !recruitment.cleanerWillProvideSupplies && styles.responsibilityStrikethrough
+                              ]}>
+                                Provide cleaning supplies
+                              </Text>
+                            </View>
+                            <View style={styles.responsibilityItem}>
+                              <Ionicons 
+                                name={recruitment.cleanerWillWashLinens ? "checkmark-circle" : "close-circle"} 
+                                size={14} 
+                                color={recruitment.cleanerWillWashLinens ? "#10B981" : "#EF4444"} 
+                              />
+                              <Text style={[
+                                styles.responsibilityText,
+                                recruitment.cleanerWillWashLinens ? styles.responsibilityIncluded : styles.responsibilityNotIncluded,
+                                !recruitment.cleanerWillWashLinens && styles.responsibilityStrikethrough
+                              ]}>
+                                Wash linens & towels
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      )}
+
+                      {selectedApplication.message && (
+                        <View style={styles.applicationMessageSection}>
+                          <Text style={styles.applicationDetailLabel}>Your Message:</Text>
+                          <Text style={styles.applicationMessage}>
+                            {selectedApplication.message}
+                          </Text>
+                        </View>
+                      )}
+
+                      {selectedApplication.experience && (
+                        <View style={styles.applicationMessageSection}>
+                          <Text style={styles.applicationDetailLabel}>Experience:</Text>
+                          <Text style={styles.applicationMessage}>
+                            {selectedApplication.experience}
+                          </Text>
+                        </View>
+                      )}
+
+                      {selectedApplication.status === 'pending' && (
+                        <TouchableOpacity
+                          style={styles.withdrawModalButton}
+                          onPress={() => {
+                            setShowApplicationModal(false);
+                            handleWithdrawBid(selectedApplication.recruitmentId, selectedApplication.id);
+                          }}
+                        >
+                          <Text style={styles.withdrawModalButtonText}>Withdraw Application</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </>
+                );
+              })()}
+            </ScrollView>
           </View>
         </View>
       </Modal>

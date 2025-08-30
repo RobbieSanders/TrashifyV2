@@ -229,7 +229,9 @@ export function SearchCleanersScreen({ navigation }: any) {
       const postData: any = {
         properties: propertiesToPost,
         servicesNeeded,
-        title: `Cleaner needed for ${propertiesToPost.length} ${propertiesToPost.length === 1 ? 'property' : 'properties'}`,
+        title: propertiesToPost.length === 1 && propertiesToPost[0].city 
+          ? `Cleaner needed in ${propertiesToPost[0].city}`
+          : `Join ${user?.firstName || 'Host'}'s Cleaning Team`,
         estimatedTurnoversPerMonth,
         estimatedCleaningTimeHours,
         cleanerWillProvideSupplies,

@@ -8,7 +8,8 @@ import {
   StyleSheet,
   Alert,
   Modal,
-  ActivityIndicator
+  ActivityIndicator,
+  Dimensions
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../stores/authStore';
@@ -22,6 +23,9 @@ import {
   withdrawBid
 } from '../../services/cleanerRecruitmentService';
 import { CleanerRecruitment, CleanerBid } from '../../utils/types';
+import { calculateDistanceGoogle } from '../../services/googleGeocodingService';
+
+const { width } = Dimensions.get('window');
 
 export function CleanerBiddingScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
@@ -31,6 +35,11 @@ export function CleanerBiddingScreen({ navigation }: any) {
   const [showBidModal, setShowBidModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingBids, setLoadingBids] = useState(true);
+  const [sortBy, setSortBy] = useState<'newest' | 'turnovers' | 'location'>('newest');
+  const [filterBy, setFilterBy] = useState<'all' | 'high-volume' | 'emergency-cleanings'>('all');
+  
+  // Distance tracking
+  const [recruitmentDistances, setRecruitmentDistances] = useState<{[key: string]: number}>({});
 
   // Bid form fields
   const [flatFee, setFlatFee] = useState('');
@@ -38,6 +47,8 @@ export function CleanerBiddingScreen({ navigation }: any) {
   const [message, setMessage] = useState('');
   const [availability, setAvailability] = useState<string[]>([]);
   const [specialties, setSpecialties] = useState<string[]>([]);
+  const [showApplicationModal, setShowApplicationModal] = useState(false);
+  const [selectedApplication, setSelectedApplication] = useState<CleanerBid | null>(null);
 
   // Availability options
   const availabilityOptions = [
@@ -60,7 +71,6 @@ export function CleanerBiddingScreen({ navigation }: any) {
   ];
 
   // Subscribe to filtered recruitment posts based on cleaner's service address
-  // Re-subscribe when the user's cleaner profile changes (especially service radius)
   useEffect(() => {
     if (!user?.uid) return;
     
@@ -89,14 +99,47 @@ export function CleanerBiddingScreen({ navigation }: any) {
     loadBidHistory();
   }, [user?.uid]);
 
+  // Calculate distances for recruitments
+  useEffect(() => {
+    const calculateDistances = async () => {
+      const cleanerProfile = user?.cleanerProfile as any;
+      if (!cleanerProfile?.serviceCoordinates || openRecruitments.length === 0) return;
+
+      const cleanerCoords = cleanerProfile.serviceCoordinates;
+      const distances: {[key: string]: number} = {};
+
+      for (const recruitment of openRecruitments) {
+        if (recruitment.properties && recruitment.properties.length > 0) {
+          // Calculate distance to the first property (or average if multiple)
+          const property = recruitment.properties[0];
+          
+          if (property.coordinates) {
+            // Use pre-geocoded coordinates if available
+            try {
+              const distance = await calculateDistanceGoogle(cleanerCoords, property.coordinates);
+              if (distance !== null) {
+                distances[recruitment.id] = distance;
+              }
+            } catch (error) {
+              console.error('Error calculating distance for recruitment:', recruitment.id, error);
+            }
+          } else if (property.address) {
+            // Fallback: use address for geocoding (this would be slower)
+            // For now, we'll skip this to avoid too many API calls
+            console.log('Property coordinates not available for:', property.address);
+          }
+        }
+      }
+
+      setRecruitmentDistances(distances);
+    };
+
+    calculateDistances();
+  }, [openRecruitments, (user?.cleanerProfile as any)?.serviceCoordinates]);
+
   const handleSubmitBid = async () => {
     if (!flatFee || !message) {
       Alert.alert('Missing Information', 'Please provide a flat fee and message');
-      return;
-    }
-
-    if (availability.length === 0) {
-      Alert.alert('Missing Availability', 'Please select your availability');
       return;
     }
 
@@ -129,7 +172,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
         bidData
       );
 
-      Alert.alert('Success', 'Your bid has been submitted');
+      Alert.alert('Success', 'Your application has been submitted! The host will review it soon.');
       setShowBidModal(false);
       
       // Reset form
@@ -144,7 +187,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
       setMyBids(bids);
     } catch (error) {
       console.error('Error submitting bid:', error);
-      Alert.alert('Error', 'Failed to submit bid');
+      Alert.alert('Error', 'Failed to submit application');
     } finally {
       setLoading(false);
     }
@@ -163,8 +206,8 @@ export function CleanerBiddingScreen({ navigation }: any) {
   // Handle withdrawing a bid
   const handleWithdrawBid = async (recruitmentId: string, bidId: string) => {
     Alert.alert(
-      'Withdraw Bid',
-      'Are you sure you want to withdraw your bid?',
+      'Withdraw Application',
+      'Are you sure you want to withdraw your application?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -173,13 +216,13 @@ export function CleanerBiddingScreen({ navigation }: any) {
           onPress: async () => {
             try {
               await withdrawBid(recruitmentId, bidId);
-              Alert.alert('Success', 'Your bid has been withdrawn');
+              Alert.alert('Success', 'Your application has been withdrawn');
               // Reload bid history
               const bids = await getCleanerBidHistory(user!.uid);
               setMyBids(bids);
             } catch (error) {
               console.error('Error withdrawing bid:', error);
-              Alert.alert('Error', 'Failed to withdraw bid');
+              Alert.alert('Error', 'Failed to withdraw application');
             }
           }
         }
@@ -187,46 +230,151 @@ export function CleanerBiddingScreen({ navigation }: any) {
     );
   };
 
+  // Filter and sort recruitments
+  const getFilteredAndSortedRecruitments = () => {
+    let filtered = [...openRecruitments];
+
+    // Apply filters
+    switch (filterBy) {
+      case 'high-volume':
+        // High volume = 5+ turnovers per month (frequent cleaning needs)
+        filtered = filtered.filter(r => (r.estimatedTurnoversPerMonth || 0) >= 5);
+        break;
+      case 'emergency-cleanings':
+        // Emergency cleanings = jobs that need to be done quickly (≤3 hours)
+        filtered = filtered.filter(r => (r.estimatedCleaningTimeHours || 0) <= 3);
+        break;
+    }
+
+    // Separate applied and unapplied opportunities
+    const unapplied = filtered.filter(r => !hasAlreadyBid(r.id));
+    const applied = filtered.filter(r => hasAlreadyBid(r.id));
+
+    // Apply sorting to unapplied opportunities
+    switch (sortBy) {
+      case 'turnovers':
+        unapplied.sort((a, b) => (b.estimatedTurnoversPerMonth || 0) - (a.estimatedTurnoversPerMonth || 0));
+        break;
+      case 'location':
+        // Sort by distance (closest first)
+        unapplied.sort((a, b) => {
+          const distanceA = recruitmentDistances[a.id] || 999;
+          const distanceB = recruitmentDistances[b.id] || 999;
+          return distanceA - distanceB;
+        });
+        break;
+      case 'newest':
+      default:
+        // Already sorted by newest from service
+        break;
+    }
+
+    // Return unapplied first, then applied at the bottom
+    return [...unapplied, ...applied];
+  };
+
+  // Calculate estimated monthly earnings based on property characteristics:
+  // - More conservative base rates: $25-35 per bedroom + $12-18 per bathroom
+  // - Reduced square footage bonus: $0.05-0.10 per sq ft for larger properties
+  // - Turnover frequency multiplier
+  // Example: 2BR/2BA (1000 sq ft) = $50-75 per job × 4 turnovers/month = $200-300/month
+  const getEstimatedMonthlyEarnings = (recruitment: CleanerRecruitment, bidAmount?: number) => {
+    if (bidAmount) {
+      // If cleaner has entered a rate, use their rate
+      const turnovers = recruitment.estimatedTurnoversPerMonth || 1;
+      const properties = recruitment.properties?.length || 1;
+      return turnovers * properties * bidAmount;
+    }
+
+    // Calculate based on property characteristics - more conservative
+    let totalEstimate = 0;
+    const turnovers = recruitment.estimatedTurnoversPerMonth || 1;
+    
+    if (recruitment.properties && recruitment.properties.length > 0) {
+      recruitment.properties.forEach(property => {
+        // Base rate calculation - more conservative
+        const bedrooms = property.bedrooms || 1;
+        const bathrooms = property.bathrooms || 1;
+        const sqft = property.unitSize || 700; // Lower default estimate
+        
+        // More conservative estimate: $25/bedroom + $12/bathroom + $0.05/sqft
+        const baseRate = (bedrooms * 25) + (bathrooms * 12) + (sqft * 0.05);
+        totalEstimate += baseRate;
+      });
+    } else {
+      // Fallback for properties without details - more conservative
+      totalEstimate = 60; // Lower average estimate
+    }
+    
+    return totalEstimate * turnovers;
+  };
+
   return (
     <>
-      <ScrollView style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Join Cleaning Teams</Text>
-          <Text style={styles.headerSubtitle}>
-            Submit bids to join host teams and get assigned regular cleaning jobs
-          </Text>
+      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+        {/* Hero Header */}
+        <View style={styles.heroHeader}>
+          <View style={styles.heroContent}>
+            <Text style={styles.heroTitle}>Cleaning Marketplace</Text>
+            <Text style={styles.heroSubtitle}>
+              Join established host teams and secure regular cleaning work
+            </Text>
+            <View style={styles.heroHighlight}>
+              <Ionicons name="trending-up" size={16} color="#10B981" />
+              <Text style={styles.heroHighlightText}>Guaranteed recurring income</Text>
+            </View>
+          </View>
+          <View style={styles.heroIcon}>
+            <Ionicons name="storefront" size={32} color="#1E88E5" />
+          </View>
         </View>
 
-        {/* My Bids Section - Only show if there are actual bids */}
+        {/* My Applications Section */}
         {!loadingBids && myBids.length > 0 && myBids.some(bid => bid.recruitmentId) && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>My Recent Bids</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>My Applications</Text>
+              <TouchableOpacity style={styles.viewAllButton}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
               {myBids
-                .filter(bid => bid.recruitmentId) // Filter out any invalid bids
+                .filter(bid => bid.recruitmentId)
                 .slice(0, 5)
                 .map(bid => (
-                <View key={bid.id} style={styles.bidStatusCard}>
-                  <View style={[styles.bidStatusBadge,
-                    bid.status === 'accepted' && styles.acceptedStatusBadge,
-                    bid.status === 'rejected' && styles.rejectedStatusBadge,
-                    bid.status === 'withdrawn' && styles.withdrawnStatusBadge
+                <TouchableOpacity 
+                  key={bid.id} 
+                  style={styles.applicationCard}
+                  onPress={() => {
+                    setSelectedApplication(bid);
+                    setShowApplicationModal(true);
+                  }}
+                >
+                  <View style={[styles.applicationStatus,
+                    bid.status === 'accepted' && styles.statusAccepted,
+                    bid.status === 'rejected' && styles.statusRejected,
+                    bid.status === 'pending' && styles.statusPending,
+                    bid.status === 'withdrawn' && styles.statusWithdrawn
                   ]}>
-                    <Text style={[
-                      styles.bidStatusText,
-                      bid.status === 'accepted' && styles.acceptedStatusText,
-                      bid.status === 'rejected' && styles.rejectedStatusText,
-                      bid.status === 'withdrawn' && styles.withdrawnStatusText
-                    ]}>
-                      {bid.status.toUpperCase()}
+                    <Ionicons 
+                      name={
+                        bid.status === 'accepted' ? 'checkmark-circle' :
+                        bid.status === 'rejected' ? 'close-circle' :
+                        bid.status === 'pending' ? 'time' : 'remove-circle'
+                      } 
+                      size={12} 
+                      color="white" 
+                    />
+                    <Text style={styles.applicationStatusText}>
+                      {bid.status === 'pending' ? 'Under Review' : bid.status.charAt(0).toUpperCase() + bid.status.slice(1)}
                     </Text>
                   </View>
-                  <Text style={styles.bidStatusAmount}>
-                    ${bid.flatFee || 0}/job
+                  <Text style={styles.applicationAmount}>
+                    ${bid.flatFee || 0}<Text style={styles.applicationAmountSuffix}>/job</Text>
                   </Text>
-                  <Text style={styles.bidStatusDate}>
-                    {new Date(bid.bidDate).toLocaleDateString()}
+                  <Text style={styles.applicationDate}>
+                    Applied {new Date(bid.bidDate).toLocaleDateString()}
                   </Text>
                   {bid.status === 'pending' && (
                     <TouchableOpacity
@@ -236,26 +384,94 @@ export function CleanerBiddingScreen({ navigation }: any) {
                       <Text style={styles.withdrawButtonText}>Withdraw</Text>
                     </TouchableOpacity>
                   )}
-                </View>
+                </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
         )}
 
-        {/* Available Recruitments */}
+        {/* Filters and Sorting */}
+        <View style={styles.filtersSection}>
+          <View style={styles.filtersRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll}>
+              <TouchableOpacity
+                style={[styles.filterChip, filterBy === 'all' && styles.filterChipActive]}
+                onPress={() => setFilterBy('all')}
+              >
+                <Text style={[styles.filterChipText, filterBy === 'all' && styles.filterChipTextActive]}>
+                  All
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.filterChip, filterBy === 'high-volume' && styles.filterChipActive]}
+                onPress={() => setFilterBy('high-volume')}
+              >
+                <Ionicons name="flash" size={12} color={filterBy === 'high-volume' ? 'white' : '#64748B'} />
+                <Text style={[styles.filterChipText, filterBy === 'high-volume' && styles.filterChipTextActive]}>
+                  High Volume
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.filterChip, styles.emergencyChip, filterBy === 'emergency-cleanings' && styles.emergencyChipActive]}
+                onPress={() => setFilterBy('emergency-cleanings')}
+              >
+                <Ionicons name="flash" size={12} color={filterBy === 'emergency-cleanings' ? 'white' : '#EF4444'} />
+                <Text style={[styles.filterChipText, styles.emergencyChipText, filterBy === 'emergency-cleanings' && styles.emergencyChipTextActive]}>
+                  Emergency
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+            
+            <View style={styles.sortDropdown}>
+              <TouchableOpacity
+                style={styles.sortButton}
+                onPress={() => {
+                  // Cycle through sort options
+                  const options: ('newest' | 'turnovers' | 'location')[] = ['newest', 'turnovers', 'location'];
+                  const currentIndex = options.indexOf(sortBy);
+                  const nextIndex = (currentIndex + 1) % options.length;
+                  setSortBy(options[nextIndex]);
+                }}
+              >
+                <Ionicons 
+                  name={
+                    sortBy === 'newest' ? 'time' :
+                    sortBy === 'turnovers' ? 'trending-up' : 'location'
+                  } 
+                  size={14} 
+                  color="#1E88E5" 
+                />
+                <Text style={styles.sortButtonText}>
+                  {sortBy === 'newest' ? 'Newest' : 
+                   sortBy === 'turnovers' ? 'Volume' : 'Distance'}
+                </Text>
+                <Ionicons name="chevron-down" size={12} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* Available Opportunities */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Available Opportunities</Text>
-          {openRecruitments.length === 0 ? (
-            <Text style={styles.emptyText}>No open recruitment posts at the moment</Text>
+          {getFilteredAndSortedRecruitments().length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="search" size={48} color="#CBD5E1" />
+              <Text style={styles.emptyStateTitle}>No opportunities found</Text>
+              <Text style={styles.emptyStateText}>
+                Try adjusting your filters or check back later for new opportunities
+              </Text>
+            </View>
           ) : (
-            openRecruitments.map(recruitment => {
+            getFilteredAndSortedRecruitments().map(recruitment => {
               const alreadyBid = hasAlreadyBid(recruitment.id);
               const myBid = getBidForRecruitment(recruitment.id);
+              const estimatedEarnings = getEstimatedMonthlyEarnings(recruitment);
               
               return (
                 <TouchableOpacity
                   key={recruitment.id}
-                  style={[styles.recruitmentCard, alreadyBid && styles.disabledCard]}
+                  style={[styles.opportunityCard, alreadyBid && styles.appliedCard]}
                   onPress={() => {
                     if (!alreadyBid) {
                       setSelectedRecruitment(recruitment);
@@ -265,144 +481,207 @@ export function CleanerBiddingScreen({ navigation }: any) {
                   disabled={alreadyBid}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={styles.teamJoinBadge}>
-                      <Ionicons name="people-outline" size={14} color="#1E88E5" />
-                      <Text style={styles.teamJoinText}>JOIN TEAM</Text>
-                    </View>
-                    {alreadyBid && (
-                      <View style={styles.alreadyBidBadge}>
-                        <Ionicons name="checkmark-circle" size={14} color="#10B981" />
-                        <Text style={styles.alreadyBidText}>Bid Submitted</Text>
-                      </View>
-                    )}
-                  </View>
-                  
-                  <Text style={styles.recruitmentTitle}>{recruitment.title || `Join ${recruitment.hostName}'s Team`}</Text>
-                  <Text style={styles.hostName}>Posted by {recruitment.hostName}</Text>
-                  
-                  {/* Properties Section - Hide addresses until cleaner joins team */}
-                  {recruitment.properties && recruitment.properties.length > 0 && (
-                    <View style={styles.propertiesSection}>
-                      <Text style={styles.propertiesLabel}>Properties to Clean:</Text>
-                      {recruitment.properties.map((property, index) => (
-                        <View key={index} style={styles.propertyCard}>
-                          <Ionicons name="home-outline" size={14} color="#64748B" />
-                          <View style={styles.propertyInfo}>
-                            <Text style={styles.propertyLabel}>
-                              Property {index + 1} {property.label ? `(${property.label})` : ''}
-                            </Text>
-                            <Text style={styles.propertyAddress}>
-                              {property.city && property.state ? `${property.city}, ${property.state}` : 'Address will be revealed after joining team'}
-                            </Text>
-                            <View style={styles.propertyDetails}>
-                              <Text style={styles.propertyDetail}>
-                                {property.bedrooms} bed • {property.bathrooms} bath
-                              </Text>
-                              {property.unitSizeUnknown ? (
-                                <Text style={styles.propertyDetail}>Size TBD</Text>
-                              ) : property.unitSize && (
-                                <Text style={styles.propertyDetail}>{property.unitSize} sq ft</Text>
-                              )}
-                            </View>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                  
-                  {/* Job Details Section */}
-                  <View style={styles.jobDetailsSection}>
-                    {recruitment.estimatedTurnoversPerMonth && (
-                      <View style={styles.detailItem}>
-                        <Ionicons name="calendar-outline" size={14} color="#64748B" />
-                        <Text style={styles.detailText}>
-                          {recruitment.estimatedTurnoversPerMonth === 11 ? '11+' : recruitment.estimatedTurnoversPerMonth} turnovers/month
+                    <View style={styles.cardHeaderLeft}>
+                      <View style={styles.hostAvatar}>
+                        <Text style={styles.hostAvatarText}>
+                          {recruitment.hostName.charAt(0).toUpperCase()}
                         </Text>
                       </View>
-                    )}
-                    
+                      <View style={styles.cardHeaderInfo}>
+                        <Text style={styles.opportunityTitle}>
+                          {recruitment.title || 
+                            (recruitment.properties && recruitment.properties.length > 0 && recruitment.properties[0].city
+                              ? `Cleaner needed in ${recruitment.properties[0].city}`
+                              : `Join ${recruitment.hostName}'s Cleaning Team`
+                            )
+                          }
+                        </Text>
+                        <Text style={styles.hostName}>by {recruitment.hostName}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.cardHeaderRight}>
+                      {/* Distance Badge */}
+                      <View style={styles.distanceBadge}>
+                        <Ionicons name="location" size={12} color="#64748B" />
+                        <Text style={styles.distanceText}>
+                          {recruitmentDistances[recruitment.id] 
+                            ? `${recruitmentDistances[recruitment.id].toFixed(1)} mi`
+                            : '-- mi'
+                          }
+                        </Text>
+                      </View>
+                      {alreadyBid && (
+                        <View style={styles.appliedBadge}>
+                          <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                          <Text style={styles.appliedBadgeText}>Applied</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+
+                  <View style={styles.earningsHighlight}>
+                    <View style={styles.earningsMain}>
+                      <Text style={styles.earningsLabel}>Estimated Monthly Earnings</Text>
+                      <Text style={styles.earningsAmount}>
+                        ${Math.round(estimatedEarnings / 10) * 10} - ${Math.round(estimatedEarnings * 1.5 / 10) * 10}*
+                      </Text>
+                    </View>
+                    <View style={styles.earningsDetails}>
+                      <Text style={styles.earningsDetail}>
+                        {recruitment.estimatedTurnoversPerMonth || 1}× turnovers/month
+                      </Text>
+                      <Text style={styles.earningsDetail}>
+                        Based on property size & complexity
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.metricsRow}>
+                    <View style={styles.metric}>
+                      <Ionicons name="calendar" size={16} color="#10B981" />
+                      <Text style={styles.metricText}>
+                        {recruitment.estimatedTurnoversPerMonth === 11 ? '11+' : recruitment.estimatedTurnoversPerMonth || 1} turnovers/month
+                      </Text>
+                    </View>
                     {recruitment.estimatedCleaningTimeHours && (
-                      <View style={styles.detailItem}>
-                        <Ionicons name="time-outline" size={14} color="#64748B" />
-                        <Text style={styles.detailText}>
+                      <View style={styles.metric}>
+                        <Ionicons name="time" size={16} color="#F59E0B" />
+                        <Text style={styles.metricText}>
                           {recruitment.estimatedCleaningTimeHours === 11 ? '11h+' : `${recruitment.estimatedCleaningTimeHours}h`} per clean
                         </Text>
                       </View>
                     )}
-                    
-                    {(recruitment.cleanerWillProvideSupplies || recruitment.cleanerWillWashLinens) && (
-                      <View style={styles.responsibilitiesContainer}>
-                        <Text style={styles.responsibilitiesLabel}>You will:</Text>
-                        {recruitment.cleanerWillProvideSupplies && (
-                          <View style={styles.responsibilityItem}>
-                            <Ionicons name="checkmark-circle" size={12} color="#10B981" />
-                            <Text style={styles.responsibilityText}>Provide cleaning supplies</Text>
-                          </View>
-                        )}
-                        {recruitment.cleanerWillWashLinens && (
-                          <View style={styles.responsibilityItem}>
-                            <Ionicons name="checkmark-circle" size={12} color="#10B981" />
-                            <Text style={styles.responsibilityText}>Wash and dry linens + towels</Text>
-                          </View>
-                        )}
-                      </View>
-                    )}
                   </View>
-                  
-                  {recruitment.notes && (
-                    <Text style={styles.recruitmentDescription} numberOfLines={3}>
-                      {recruitment.notes}
-                    </Text>
-                  )}
-                  
-                  {recruitment.servicesNeeded && recruitment.servicesNeeded.length > 0 && (
-                    <View style={styles.servicesNeeded}>
-                      <Text style={styles.servicesLabel}>Services Needed:</Text>
-                      <View style={styles.serviceTagsContainer}>
-                        {recruitment.servicesNeeded.slice(0, 3).map((service, index) => (
-                          <View key={index} style={styles.serviceTag}>
-                            <Text style={styles.serviceTagText}>{service}</Text>
+
+                  {/* Combined Property Details & Cleaner Responsibilities */}
+                  {recruitment.properties && recruitment.properties.length > 0 && (
+                    <View style={styles.propertyDetailsSection}>
+                      <Text style={styles.propertyDetailsTitle}>Property Details & Requirements:</Text>
+                      
+                      {/* Property Specs - Compact Layout */}
+                      <View style={styles.propertyDetailsGrid}>
+                        {recruitment.properties.map((property, index) => {
+                          // Check both possible field names for bedrooms and bathrooms
+                          const bedrooms = property.bedrooms ?? property.beds;
+                          const bathrooms = property.bathrooms;
+                          
+                          // Estimate square footage if not provided
+                          let sqft = property.unitSize;
+                          let isEstimated = false;
+                          if (!sqft && bedrooms && bathrooms) {
+                            // Rough estimation: 400 sq ft base + 200 per bedroom + 100 per bathroom
+                            sqft = 400 + (bedrooms * 200) + (bathrooms * 100);
+                            isEstimated = true;
+                          } else if (!sqft) {
+                            // Default estimate if no data
+                            sqft = 800;
+                            isEstimated = true;
+                          }
+                          
+                          return (
+                            <View key={index} style={styles.propertyDetailCard}>
+                              <View style={styles.propertyDetailSpecs}>
+                                <View style={styles.propertySpec}>
+                                  <Ionicons name="home" size={12} color="#1E88E5" />
+                                  <Text style={styles.propertySpecText}>
+                                    {bedrooms !== undefined && bedrooms !== null ? bedrooms : 'N/A'} bedroom{(bedrooms || 0) !== 1 ? 's' : ''}
+                                  </Text>
+                                </View>
+                                <View style={styles.propertySpec}>
+                                  <Ionicons name="water" size={12} color="#1E88E5" />
+                                  <Text style={styles.propertySpecText}>
+                                    {bathrooms !== undefined && bathrooms !== null ? bathrooms : 'N/A'} bath{(bathrooms || 0) !== 1 ? 's' : ''}
+                                  </Text>
+                                </View>
+                                <View style={styles.propertySpec}>
+                                  <Ionicons name="bed" size={12} color="#1E88E5" />
+                                  <Text style={styles.propertySpecText}>
+                                    {property.beds !== undefined && property.beds !== null ? property.beds : 'N/A'} bed{(property.beds || 0) !== 1 ? 's' : ''}
+                                  </Text>
+                                </View>
+                                <View style={styles.propertySpec}>
+                                  <Ionicons name="resize" size={12} color="#1E88E5" />
+                                  <Text style={styles.propertySpecText}>
+                                    {sqft} sq ft{isEstimated ? '?' : ''}
+                                  </Text>
+                                </View>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                      
+                      {/* Cleaner Responsibilities - Compact */}
+                      <View style={styles.compactResponsibilities}>
+                        <Text style={styles.responsibilitiesSubtitle}>Cleaner Will:</Text>
+                        <View style={styles.responsibilitiesHorizontal}>
+                          <View style={styles.responsibilityItem}>
+                            <Ionicons 
+                              name={recruitment.cleanerWillProvideSupplies ? "checkmark-circle" : "close-circle"} 
+                              size={14} 
+                              color={recruitment.cleanerWillProvideSupplies ? "#10B981" : "#EF4444"} 
+                            />
+                            <Text style={[
+                              styles.responsibilityText, 
+                              recruitment.cleanerWillProvideSupplies ? styles.responsibilityIncluded : styles.responsibilityNotIncluded,
+                              !recruitment.cleanerWillProvideSupplies && styles.responsibilityStrikethrough
+                            ]}>
+                              Provide cleaning supplies
+                            </Text>
                           </View>
-                        ))}
-                        {recruitment.servicesNeeded.length > 3 && (
-                          <Text style={styles.moreServices}>
-                            +{recruitment.servicesNeeded.length - 3} more
-                          </Text>
-                        )}
+                          <View style={styles.responsibilityItem}>
+                            <Ionicons 
+                              name={recruitment.cleanerWillWashLinens ? "checkmark-circle" : "close-circle"} 
+                              size={14} 
+                              color={recruitment.cleanerWillWashLinens ? "#10B981" : "#EF4444"} 
+                            />
+                            <Text style={[
+                              styles.responsibilityText,
+                              recruitment.cleanerWillWashLinens ? styles.responsibilityIncluded : styles.responsibilityNotIncluded,
+                              !recruitment.cleanerWillWashLinens && styles.responsibilityStrikethrough
+                            ]}>
+                              Wash linens & towels
+                            </Text>
+                          </View>
+                        </View>
                       </View>
                     </View>
                   )}
-                  
-                  <View style={styles.statsRow}>
-                    <Text style={styles.statText}>
-                      <Text style={styles.statNumber}>{recruitment.bids?.length || 0}</Text> applicants
-                    </Text>
-                    {recruitment.properties && (
-                      <Text style={styles.statText}>
-                        <Text style={styles.statNumber}>{recruitment.properties.length}</Text> properties
+
+                  {recruitment.notes && (
+                    <View style={styles.notesSection}>
+                      <Text style={styles.notesLabel}>Notes from the host:</Text>
+                      <Text style={styles.opportunityDescription}>
+                        {recruitment.notes}
                       </Text>
-                    )}
-                    <Text style={styles.statText}>
-                      <Text style={styles.statHighlight}>Regular work</Text>
-                    </Text>
-                  </View>
-                  
-                  {!alreadyBid ? (
-                    <TouchableOpacity style={styles.bidButton}>
-                      <Text style={styles.bidButtonText}>Apply to Join Team</Text>
-                      <Ionicons name="arrow-forward" size={16} color="white" />
-                    </TouchableOpacity>
-                  ) : myBid && myBid.status === 'pending' && (
-                    <TouchableOpacity
-                      style={styles.withdrawFullButton}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleWithdrawBid(recruitment.id, myBid.id);
-                      }}
-                    >
-                      <Text style={styles.withdrawFullButtonText}>Withdraw Application</Text>
-                    </TouchableOpacity>
+                    </View>
                   )}
+
+                  <View style={styles.cardFooter}>
+                    {!alreadyBid ? (
+                      <TouchableOpacity 
+                        style={styles.applyButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          setSelectedRecruitment(recruitment);
+                          setShowBidModal(true);
+                        }}
+                      >
+                        <Text style={styles.applyButtonText}>Apply Now</Text>
+                        <Ionicons name="arrow-forward" size={14} color="white" />
+                      </TouchableOpacity>
+                    ) : myBid && myBid.status === 'pending' && (
+                      <TouchableOpacity
+                        style={styles.withdrawCardButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleWithdrawBid(recruitment.id, myBid.id);
+                        }}
+                      >
+                        <Text style={styles.withdrawCardButtonText}>Withdraw</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </TouchableOpacity>
               );
             })
@@ -410,7 +689,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
         </View>
       </ScrollView>
 
-      {/* Bid Submission Modal */}
+      {/* Enhanced Bid Submission Modal */}
       <Modal
         visible={showBidModal}
         animationType="slide"
@@ -428,117 +707,314 @@ export function CleanerBiddingScreen({ navigation }: any) {
 
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               {selectedRecruitment && (
-                <View style={styles.recruitmentSummary}>
-                  <Text style={styles.summaryTitle}>Join {selectedRecruitment.hostName}'s Team</Text>
-                  {selectedRecruitment.properties && selectedRecruitment.properties.length > 0 && (
-                    <Text style={styles.summaryProperties}>
-                      {selectedRecruitment.properties.length} propert{selectedRecruitment.properties.length === 1 ? 'y' : 'ies'} to clean
-                    </Text>
-                  )}
-                  <Text style={styles.summaryInfo}>
-                    Once accepted, you'll be assigned regular cleaning jobs
+                <View style={styles.opportunitySummary}>
+                  <View style={styles.summaryHeader}>
+                    <View style={styles.summaryHostAvatar}>
+                      <Text style={styles.summaryHostAvatarText}>
+                        {selectedRecruitment.hostName.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.summaryInfo}>
+                      <Text style={styles.summaryTitle}>
+                        {selectedRecruitment.title || `${selectedRecruitment.hostName}'s Team`}
+                      </Text>
+                      <Text style={styles.summaryHost}>by {selectedRecruitment.hostName}</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.summaryStats}>
+                    <View style={styles.summaryStat}>
+                      <Text style={styles.summaryStatNumber}>
+                        {selectedRecruitment.properties && selectedRecruitment.properties.length > 0 && selectedRecruitment.properties[0].city
+                          ? selectedRecruitment.properties[0].city
+                          : selectedRecruitment.properties?.length || 1
+                        }
+                      </Text>
+                      <Text style={styles.summaryStatLabel}>
+                        {selectedRecruitment.properties && selectedRecruitment.properties.length > 0 && selectedRecruitment.properties[0].city
+                          ? 'Location'
+                          : 'Properties'
+                        }
+                      </Text>
+                    </View>
+                    <View style={styles.summaryStat}>
+                      <Text style={styles.summaryStatNumber}>
+                        {selectedRecruitment.estimatedTurnoversPerMonth || 1}
+                      </Text>
+                      <Text style={styles.summaryStatLabel}>Jobs/Month</Text>
+                    </View>
+                  </View>
+                  
+                  <Text style={styles.summaryDescription}>
+                    Join this team to get regular cleaning assignments and build a steady income stream.
                   </Text>
                 </View>
               )}
 
-              <Text style={styles.label}>Your Flat Fee Per Job *</Text>
-              <View style={styles.rateInput}>
-                <Text style={styles.dollarSign}>$</Text>
+              <View style={styles.formSection}>
+                <Text style={styles.formSectionTitle}>Your Proposal</Text>
+                
+                <Text style={styles.label}>Rate Per Job *</Text>
+                <View style={styles.rateInputContainer}>
+                  <View style={styles.rateInput}>
+                    <Text style={styles.dollarSign}>$</Text>
+                    <TextInput
+                      style={styles.rateInputField}
+                      value={flatFee}
+                      onChangeText={setFlatFee}
+                      placeholder="50"
+                      keyboardType="numeric"
+                    />
+                    <Text style={styles.perJob}>/job</Text>
+                  </View>
+                  {flatFee && selectedRecruitment && (
+                    <Text style={styles.earningsEstimate}>
+                      Estimated monthly: ${Math.round(getEstimatedMonthlyEarnings(selectedRecruitment, parseFloat(flatFee) || 0))}
+                    </Text>
+                  )}
+                </View>
+
+                <Text style={styles.label}>Cover Message *</Text>
                 <TextInput
-                  style={styles.input}
-                  value={flatFee}
-                  onChangeText={setFlatFee}
-                  placeholder="50"
-                  keyboardType="numeric"
+                  style={[styles.input, styles.textArea]}
+                  value={message}
+                  onChangeText={setMessage}
+                  placeholder="Tell the host why you're perfect for their team. Highlight your experience, reliability, and what makes you stand out..."
+                  multiline
+                  numberOfLines={4}
                 />
-                <Text style={styles.perHour}>/job</Text>
+
+
+                <Text style={styles.label}>Experience (Optional)</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={experience}
+                  onChangeText={setExperience}
+                  placeholder="Describe your cleaning experience, certifications, or special skills..."
+                  multiline
+                  numberOfLines={3}
+                />
+
+
+                <TouchableOpacity
+                  style={[styles.submitButton, loading && styles.buttonDisabled]}
+                  onPress={handleSubmitBid}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Text style={styles.submitButtonText}>Submit Application</Text>
+                  )}
+                </TouchableOpacity>
               </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
-              <Text style={styles.label}>Your Experience</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={experience}
-                onChangeText={setExperience}
-                placeholder="Describe your cleaning experience..."
-                multiline
-                numberOfLines={3}
-              />
-
-              <Text style={styles.label}>Cover Message *</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={message}
-                onChangeText={setMessage}
-                placeholder="Tell the host why you're the perfect fit for their team..."
-                multiline
-                numberOfLines={4}
-              />
-
-              <Text style={styles.label}>Your Availability *</Text>
-              <View style={styles.optionsContainer}>
-                {availabilityOptions.map(day => (
-                  <TouchableOpacity
-                    key={day}
-                    style={[
-                      styles.optionChip,
-                      availability.includes(day) && styles.optionChipSelected
-                    ]}
-                    onPress={() => {
-                      if (availability.includes(day)) {
-                        setAvailability(availability.filter(d => d !== day));
-                      } else {
-                        setAvailability([...availability, day]);
-                      }
-                    }}
-                  >
-                    <Text style={[
-                      styles.optionChipText,
-                      availability.includes(day) && styles.optionChipTextSelected
-                    ]}>
-                      {day}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <Text style={styles.label}>Your Specialties</Text>
-              <View style={styles.optionsContainer}>
-                {specialtyOptions.map(specialty => (
-                  <TouchableOpacity
-                    key={specialty}
-                    style={[
-                      styles.optionChip,
-                      specialties.includes(specialty) && styles.optionChipSelected
-                    ]}
-                    onPress={() => {
-                      if (specialties.includes(specialty)) {
-                        setSpecialties(specialties.filter(s => s !== specialty));
-                      } else {
-                        setSpecialties([...specialties, specialty]);
-                      }
-                    }}
-                  >
-                    <Text style={[
-                      styles.optionChipText,
-                      specialties.includes(specialty) && styles.optionChipTextSelected
-                    ]}>
-                      {specialty}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <TouchableOpacity
-                style={[styles.submitButton, loading && styles.buttonDisabled]}
-                onPress={handleSubmitBid}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="white" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Submit Application</Text>
-                )}
+      {/* Application Details Modal */}
+      <Modal
+        visible={showApplicationModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowApplicationModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Application Details</Text>
+              <TouchableOpacity onPress={() => setShowApplicationModal(false)}>
+                <Ionicons name="close" size={24} color="#64748B" />
               </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {selectedApplication && (() => {
+                // Find the recruitment data for this application
+                const recruitment = openRecruitments.find(r => r.id === selectedApplication.recruitmentId);
+                
+                return (
+                  <>
+                    <View style={styles.applicationDetailCard}>
+                      <View style={[styles.applicationStatus,
+                        selectedApplication.status === 'accepted' && styles.statusAccepted,
+                        selectedApplication.status === 'rejected' && styles.statusRejected,
+                        selectedApplication.status === 'pending' && styles.statusPending,
+                        selectedApplication.status === 'withdrawn' && styles.statusWithdrawn
+                      ]}>
+                        <Ionicons 
+                          name={
+                            selectedApplication.status === 'accepted' ? 'checkmark-circle' :
+                            selectedApplication.status === 'rejected' ? 'close-circle' :
+                            selectedApplication.status === 'pending' ? 'time' : 'remove-circle'
+                          } 
+                          size={16} 
+                          color="white" 
+                        />
+                        <Text style={[styles.applicationStatusText, { fontSize: 14 }]}>
+                          {selectedApplication.status === 'pending' ? 'Under Review' : 
+                           selectedApplication.status.charAt(0).toUpperCase() + selectedApplication.status.slice(1)}
+                        </Text>
+                      </View>
+
+                      <View style={styles.applicationDetailRow}>
+                        <Text style={styles.applicationDetailLabel}>Rate:</Text>
+                        <Text style={styles.applicationDetailValue}>
+                          ${selectedApplication.flatFee || 0}/job
+                        </Text>
+                      </View>
+
+                      <View style={styles.applicationDetailRow}>
+                        <Text style={styles.applicationDetailLabel}>Applied:</Text>
+                        <Text style={styles.applicationDetailValue}>
+                          {new Date(selectedApplication.bidDate).toLocaleDateString()}
+                        </Text>
+                      </View>
+
+                      {recruitment && (
+                        <>
+                          <View style={styles.applicationDetailRow}>
+                            <Text style={styles.applicationDetailLabel}>Turnovers/Month:</Text>
+                            <Text style={styles.applicationDetailValue}>
+                              {recruitment.estimatedTurnoversPerMonth === 11 ? '11+' : recruitment.estimatedTurnoversPerMonth || 1}
+                            </Text>
+                          </View>
+
+                          {recruitment.estimatedCleaningTimeHours && (
+                            <View style={styles.applicationDetailRow}>
+                              <Text style={styles.applicationDetailLabel}>Hours per Clean:</Text>
+                              <Text style={styles.applicationDetailValue}>
+                                {recruitment.estimatedCleaningTimeHours === 11 ? '11h+' : `${recruitment.estimatedCleaningTimeHours}h`}
+                              </Text>
+                            </View>
+                          )}
+                        </>
+                      )}
+
+                      {/* Property Details */}
+                      {recruitment && recruitment.properties && recruitment.properties.length > 0 && (
+                        <View style={styles.applicationMessageSection}>
+                          <Text style={styles.applicationDetailLabel}>Property Details:</Text>
+                          <View style={styles.propertyDetailsGrid}>
+                            {recruitment.properties.map((property, index) => {
+                              const bedrooms = property.bedrooms ?? property.beds;
+                              const bathrooms = property.bathrooms;
+                              let sqft = property.unitSize;
+                              let isEstimated = false;
+                              if (!sqft && bedrooms && bathrooms) {
+                                sqft = 400 + (bedrooms * 200) + (bathrooms * 100);
+                                isEstimated = true;
+                              } else if (!sqft) {
+                                sqft = 800;
+                                isEstimated = true;
+                              }
+                              
+                              return (
+                                <View key={index} style={styles.propertyDetailCard}>
+                                  <View style={styles.propertyDetailSpecs}>
+                                    <View style={styles.propertySpec}>
+                                      <Ionicons name="home" size={12} color="#1E88E5" />
+                                      <Text style={styles.propertySpecText}>
+                                        {bedrooms !== undefined && bedrooms !== null ? bedrooms : 'N/A'} bedroom{(bedrooms || 0) !== 1 ? 's' : ''}
+                                      </Text>
+                                    </View>
+                                    <View style={styles.propertySpec}>
+                                      <Ionicons name="water" size={12} color="#1E88E5" />
+                                      <Text style={styles.propertySpecText}>
+                                        {bathrooms !== undefined && bathrooms !== null ? bathrooms : 'N/A'} bath{(bathrooms || 0) !== 1 ? 's' : ''}
+                                      </Text>
+                                    </View>
+                                    <View style={styles.propertySpec}>
+                                      <Ionicons name="bed" size={12} color="#1E88E5" />
+                                      <Text style={styles.propertySpecText}>
+                                        {property.beds !== undefined && property.beds !== null ? property.beds : 'N/A'} bed{(property.beds || 0) !== 1 ? 's' : ''}
+                                      </Text>
+                                    </View>
+                                    <View style={styles.propertySpec}>
+                                      <Ionicons name="resize" size={12} color="#1E88E5" />
+                                      <Text style={styles.propertySpecText}>
+                                        {sqft} sq ft{isEstimated ? '?' : ''}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Cleaner Responsibilities */}
+                      {recruitment && (
+                        <View style={styles.applicationMessageSection}>
+                          <Text style={styles.applicationDetailLabel}>Cleaner Responsibilities:</Text>
+                          <View style={styles.responsibilitiesHorizontal}>
+                            <View style={styles.responsibilityItem}>
+                              <Ionicons 
+                                name={recruitment.cleanerWillProvideSupplies ? "checkmark-circle" : "close-circle"} 
+                                size={14} 
+                                color={recruitment.cleanerWillProvideSupplies ? "#10B981" : "#EF4444"} 
+                              />
+                              <Text style={[
+                                styles.responsibilityText, 
+                                recruitment.cleanerWillProvideSupplies ? styles.responsibilityIncluded : styles.responsibilityNotIncluded,
+                                !recruitment.cleanerWillProvideSupplies && styles.responsibilityStrikethrough
+                              ]}>
+                                Provide cleaning supplies
+                              </Text>
+                            </View>
+                            <View style={styles.responsibilityItem}>
+                              <Ionicons 
+                                name={recruitment.cleanerWillWashLinens ? "checkmark-circle" : "close-circle"} 
+                                size={14} 
+                                color={recruitment.cleanerWillWashLinens ? "#10B981" : "#EF4444"} 
+                              />
+                              <Text style={[
+                                styles.responsibilityText,
+                                recruitment.cleanerWillWashLinens ? styles.responsibilityIncluded : styles.responsibilityNotIncluded,
+                                !recruitment.cleanerWillWashLinens && styles.responsibilityStrikethrough
+                              ]}>
+                                Wash linens & towels
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      )}
+
+                      {selectedApplication.message && (
+                        <View style={styles.applicationMessageSection}>
+                          <Text style={styles.applicationDetailLabel}>Your Message:</Text>
+                          <Text style={styles.applicationMessage}>
+                            {selectedApplication.message}
+                          </Text>
+                        </View>
+                      )}
+
+                      {selectedApplication.experience && (
+                        <View style={styles.applicationMessageSection}>
+                          <Text style={styles.applicationDetailLabel}>Experience:</Text>
+                          <Text style={styles.applicationMessage}>
+                            {selectedApplication.experience}
+                          </Text>
+                        </View>
+                      )}
+
+                      {selectedApplication.status === 'pending' && (
+                        <TouchableOpacity
+                          style={styles.withdrawModalButton}
+                          onPress={() => {
+                            setShowApplicationModal(false);
+                            handleWithdrawBid(selectedApplication.recruitmentId, selectedApplication.id);
+                          }}
+                        >
+                          <Text style={styles.withdrawModalButtonText}>Withdraw Application</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </>
+                );
+              })()}
             </ScrollView>
           </View>
         </View>
@@ -550,203 +1026,414 @@ export function CleanerBiddingScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#F8FAFC',
   },
-  header: {
+  scrollContent: {
+    paddingBottom: 100, // Add padding to prevent overlap with bottom tabs
+  },
+  heroHeader: {
     backgroundColor: 'white',
     padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#E2E8F0',
   },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
+  heroContent: {
+    flex: 1,
+  },
+  heroTitle: {
+    fontSize: 28,
+    fontWeight: '800',
     color: '#0F172A',
+    marginBottom: 4,
   },
-  headerSubtitle: {
-    fontSize: 14,
+  heroSubtitle: {
+    fontSize: 15,
     color: '#64748B',
-    marginTop: 4,
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  heroHighlight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroHighlightText: {
+    fontSize: 13,
+    color: '#10B981',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  heroIcon: {
+    width: 60,
+    height: 60,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  marketplaceStats: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  statCard: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#1E88E5',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+    textAlign: 'center',
   },
   section: {
     padding: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#0F172A',
-    marginBottom: 12,
   },
-  bidStatusCard: {
+  viewAllButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 6,
+  },
+  viewAllText: {
+    fontSize: 13,
+    color: '#475569',
+    fontWeight: '600',
+  },
+  horizontalScroll: {
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+  },
+  applicationCard: {
     backgroundColor: 'white',
     borderRadius: 12,
     padding: 12,
     marginRight: 12,
-    minWidth: 100,
-    alignItems: 'center',
+    minWidth: 120,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#E2E8F0',
   },
-  bidStatusBadge: {
-    backgroundColor: '#FEF3C7',
+  applicationStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginBottom: 4,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginBottom: 8,
   },
-  acceptedStatusBadge: {
-    backgroundColor: '#DCFCE7',
+  statusPending: {
+    backgroundColor: '#F59E0B',
   },
-  rejectedStatusBadge: {
-    backgroundColor: '#FEE2E2',
+  statusAccepted: {
+    backgroundColor: '#10B981',
   },
-  bidStatusText: {
+  statusRejected: {
+    backgroundColor: '#EF4444',
+  },
+  statusWithdrawn: {
+    backgroundColor: '#64748B',
+  },
+  applicationStatusText: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#92400E',
+    color: 'white',
+    marginLeft: 4,
   },
-  bidStatusAmount: {
-    fontSize: 16,
+  applicationAmount: {
+    fontSize: 18,
     fontWeight: '700',
     color: '#0F172A',
-    marginTop: 4,
+    marginBottom: 4,
   },
-  bidStatusDate: {
+  applicationAmountSuffix: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '400',
+  },
+  applicationDate: {
     fontSize: 11,
     color: '#64748B',
-    marginTop: 2,
+    marginBottom: 8,
   },
-  recruitmentCard: {
+  withdrawButton: {
+    backgroundColor: '#FEE2E2',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  withdrawButtonText: {
+    fontSize: 11,
+    color: '#EF4444',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  filtersSection: {
     backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
   },
-  disabledCard: {
-    opacity: 0.6,
+  filtersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  filtersScroll: {
+    flex: 1,
+    marginRight: 12,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    marginRight: 8,
+    minHeight: 32,
+  },
+  filterChipActive: {
+    backgroundColor: '#1E88E5',
+  },
+  filterChipText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '600',
+    marginLeft: 3,
+  },
+  filterChipTextActive: {
+    color: 'white',
+  },
+  sortDropdown: {
+    minWidth: 100,
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    minHeight: 32,
+    justifyContent: 'center',
+  },
+  sortButtonText: {
+    fontSize: 11,
+    color: '#1E88E5',
+    fontWeight: '600',
+    marginHorizontal: 3,
+    textAlign: 'center',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#475569',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  opportunityCard: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  appliedCard: {
+    opacity: 0.7,
+    borderColor: '#10B981',
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 4,
+    marginBottom: 12,
   },
-  recruitmentTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0F172A',
+  cardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
   },
-  alreadyBidBadge: {
+  hostAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1E88E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  hostAvatarText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'white',
+  },
+  cardHeaderInfo: {
+    flex: 1,
+  },
+  opportunityTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 2,
+  },
+  hostName: {
+    fontSize: 13,
+    color: '#64748B',
+  },
+  hostTagline: {
+    fontSize: 12,
+    color: '#10B981',
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  appliedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#DCFCE7',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
-    marginLeft: 8,
   },
-  alreadyBidText: {
+  appliedBadgeText: {
     fontSize: 11,
     color: '#166534',
     marginLeft: 4,
     fontWeight: '600',
   },
-  hostName: {
-    fontSize: 13,
-    color: '#64748B',
-    marginBottom: 8,
+  earningsHighlight: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
   },
-  recruitmentDescription: {
+  earningsMain: {
+    marginBottom: 6,
+  },
+  earningsLabel: {
+    fontSize: 12,
+    color: '#166534',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  earningsAmount: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  earningsDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  earningsDetail: {
+    fontSize: 11,
+    color: '#166534',
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  metric: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  metricText: {
+    fontSize: 12,
+    color: '#475569',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  opportunityDescription: {
     fontSize: 14,
     color: '#475569',
     lineHeight: 20,
     marginBottom: 12,
   },
-  servicesNeeded: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 12,
-  },
-  serviceTag: {
-    backgroundColor: '#E3F2FD',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginRight: 6,
-    marginBottom: 6,
-  },
-  serviceTagText: {
-    fontSize: 11,
-    color: '#1E88E5',
-  },
-  moreServices: {
-    fontSize: 11,
-    color: '#64748B',
-    marginLeft: 4,
-    alignSelf: 'center',
-  },
   cardFooter: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  payInfo: {
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-  },
-  payText: {
-    fontSize: 14,
-    color: '#10B981',
-    fontWeight: '600',
-    marginLeft: 4,
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  locationText: {
-    fontSize: 13,
-    color: '#64748B',
-    marginLeft: 4,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    paddingTop: 8,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
+    borderTopColor: '#F1F5F9',
   },
-  statText: {
-    fontSize: 12,
-    color: '#64748B',
-    marginRight: 16,
+  emergencyChip: {
+    backgroundColor: '#FEE2E2',
   },
-  statNumber: {
-    fontWeight: '600',
-    color: '#0F172A',
+  emergencyChipActive: {
+    backgroundColor: '#EF4444',
   },
-  bidButton: {
+  emergencyChipText: {
+    color: '#EF4444',
+  },
+  emergencyChipTextActive: {
+    color: 'white',
+  },
+  applyButton: {
     backgroundColor: '#10B981',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
-    marginTop: 12,
   },
-  bidButtonText: {
+  applyButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    marginRight: 6,
+    marginRight: 4,
   },
-  emptyText: {
-    textAlign: 'center',
-    color: '#94A3B8',
-    fontSize: 14,
-    marginTop: 20,
+  withdrawCardButton: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  withdrawCardButtonText: {
+    fontSize: 12,
+    color: '#EF4444',
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
@@ -765,7 +1452,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#E2E8F0',
   },
   modalTitle: {
     fontSize: 20,
@@ -775,27 +1462,75 @@ const styles = StyleSheet.create({
   modalBody: {
     padding: 20,
   },
-  recruitmentSummary: {
-    backgroundColor: '#F8F9FA',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+  opportunitySummary: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  summaryHostAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#1E88E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  summaryHostAvatarText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: 'white',
+  },
+  summaryInfo: {
+    flex: 1,
   },
   summaryTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: '#0F172A',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   summaryHost: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#64748B',
   },
-  summaryPay: {
+  summaryStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 12,
+  },
+  summaryStat: {
+    alignItems: 'center',
+  },
+  summaryStatNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1E88E5',
+  },
+  summaryStatLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  summaryDescription: {
     fontSize: 13,
-    color: '#10B981',
-    fontWeight: '600',
-    marginTop: 4,
+    color: '#475569',
+    lineHeight: 18,
+  },
+  formSection: {
+    marginTop: 8,
+  },
+  formSectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 16,
   },
   label: {
     fontSize: 14,
@@ -804,45 +1539,65 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 12,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#0F172A',
-    backgroundColor: '#FFFFFF',
-    flex: 1,
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
+  rateInputContainer: {
+    marginBottom: 4,
   },
   rateInput: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: 'white',
   },
   dollarSign: {
     fontSize: 16,
     color: '#64748B',
     marginRight: 8,
   },
-  perHour: {
+  rateInputField: {
+    flex: 1,
+    fontSize: 16,
+    color: '#0F172A',
+  },
+  perJob: {
     fontSize: 14,
     color: '#64748B',
     marginLeft: 8,
   },
+  earningsEstimate: {
+    fontSize: 12,
+    color: '#10B981',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#0F172A',
+    backgroundColor: 'white',
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
   optionsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    marginTop: 4,
   },
   optionChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#E2E8F0',
     backgroundColor: 'white',
     marginRight: 8,
     marginBottom: 8,
@@ -864,7 +1619,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 24,
     marginBottom: 20,
   },
   buttonDisabled: {
@@ -875,159 +1630,197 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  teamJoinBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E3F2FD',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  notesSection: {
+    marginBottom: 12,
+    backgroundColor: '#F8FAFC',
+    padding: 12,
     borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#1E88E5',
   },
-  teamJoinText: {
-    fontSize: 11,
-    color: '#1E88E5',
-    marginLeft: 4,
-    fontWeight: '600',
+  notesLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 6,
   },
-  propertiesSection: {
-    marginVertical: 12,
-    backgroundColor: '#F8F9FA',
-    padding: 10,
+  responsibilitiesSection: {
+    backgroundColor: '#F8FAFC',
     borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
   },
-  propertiesLabel: {
-    fontSize: 12,
+  responsibilitiesTitle: {
+    fontSize: 13,
     fontWeight: '600',
     color: '#334155',
     marginBottom: 8,
   },
-  propertyCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 6,
-  },
-  propertyInfo: {
-    flex: 1,
-    marginLeft: 8,
-  },
-  propertyLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#0F172A',
-    marginBottom: 2,
-  },
-  propertyAddress: {
-    fontSize: 12,
-    color: '#475569',
-    marginBottom: 4,
-  },
-  propertyDetails: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  propertyDetail: {
-    fontSize: 11,
-    color: '#64748B',
-    marginRight: 12,
-  },
-  servicesLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#334155',
-    marginBottom: 6,
-  },
-  serviceTagsContainer: {
+  responsibilitiesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-  },
-  statHighlight: {
-    fontWeight: '600',
-    color: '#10B981',
-  },
-  summaryProperties: {
-    fontSize: 13,
-    color: '#10B981',
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  summaryInfo: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 6,
-  },
-  withdrawnStatusBadge: {
-    backgroundColor: '#F3F4F6',
-  },
-  acceptedStatusText: {
-    color: '#166534',
-  },
-  rejectedStatusText: {
-    color: '#EF4444',
-  },
-  withdrawnStatusText: {
-    color: '#64748B',
-  },
-  withdrawButton: {
-    marginTop: 8,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    backgroundColor: '#FEE2E2',
-    borderRadius: 6,
-  },
-  withdrawButtonText: {
-    fontSize: 11,
-    color: '#EF4444',
-    fontWeight: '600',
-  },
-  withdrawFullButton: {
-    backgroundColor: '#FEE2E2',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginTop: 12,
-  },
-  withdrawFullButtonText: {
-    fontSize: 12,
-    color: '#EF4444',
-    fontWeight: '600',
-  },
-  jobDetailsSection: {
-    backgroundColor: '#F8F9FA',
-    padding: 10,
-    borderRadius: 8,
-    marginVertical: 8,
-  },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  detailText: {
-    fontSize: 12,
-    color: '#475569',
-    marginLeft: 6,
-    fontWeight: '500',
-  },
-  responsibilitiesContainer: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  responsibilitiesLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#334155',
-    marginBottom: 4,
   },
   responsibilityItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 3,
+    marginRight: 16,
+    marginBottom: 4,
   },
   responsibilityText: {
     fontSize: 11,
-    color: '#475569',
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  responsibilityIncluded: {
+    color: '#166534',
+  },
+  responsibilityNotIncluded: {
+    color: '#991B1B',
+  },
+  propertyDetailsSection: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  propertyDetailsTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 12,
+  },
+  propertyDetailsGrid: {
+    marginBottom: 8,
+  },
+  propertyDetailCard: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  propertyDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  propertyDetailLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0F172A',
+    marginLeft: 6,
+  },
+  propertyDetailSpecs: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  propertySpec: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  propertySpecText: {
+    fontSize: 10,
+    color: '#334155',
     marginLeft: 4,
+    fontWeight: '600',
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 8,
+  },
+  responsibilitiesSubtitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 6,
+  },
+  compactResponsibilities: {
+    marginTop: 4,
+  },
+  cardHeaderRight: {
+    alignItems: 'flex-end',
+  },
+  distanceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    marginBottom: 4,
+  },
+  distanceText: {
+    fontSize: 11,
+    color: '#64748B',
+    marginLeft: 4,
+    fontWeight: '600',
+  },
+  responsibilitiesHorizontal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  responsibilityStrikethrough: {
+    textDecorationLine: 'line-through',
+  },
+  applicationDetailCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  applicationDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  applicationDetailLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  applicationDetailValue: {
+    fontSize: 14,
+    color: '#0F172A',
+    fontWeight: '500',
+  },
+  applicationMessageSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  applicationMessage: {
+    fontSize: 14,
+    color: '#475569',
+    lineHeight: 20,
+    marginTop: 6,
+    backgroundColor: '#F8FAFC',
+    padding: 12,
+    borderRadius: 8,
+  },
+  withdrawModalButton: {
+    backgroundColor: '#EF4444',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  withdrawModalButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
