@@ -308,6 +308,28 @@ export async function createCleaningJobsFromEvents(
   const now = new Date();
   now.setHours(23, 59, 59, 999); // End of today
   
+  // Get primary cleaner assigned to this property
+  let primaryCleaner: any = null;
+  try {
+    const teamMembersRef = collection(db, 'users', hostId, 'teamMembers');
+    const teamSnapshot = await getDocs(teamMembersRef);
+    
+    // Find primary cleaner assigned to this property
+    for (const memberDoc of teamSnapshot.docs) {
+      const member = memberDoc.data();
+      if (member.role === 'primary_cleaner' && 
+          member.status === 'active' && 
+          member.assignedProperties && 
+          member.assignedProperties.includes(propertyId)) {
+        primaryCleaner = { id: memberDoc.id, ...member };
+        console.log(`Found primary cleaner ${primaryCleaner.name} assigned to property ${propertyAddress}`);
+        break;
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching team members for auto-assignment:', error);
+  }
+  
   // Filter for future checkout dates (tomorrow onwards)
   const futureCheckouts = events.filter(event => {
     // Checkout is typically on the end date of a booking
@@ -335,7 +357,7 @@ export async function createCleaningJobsFromEvents(
       cleaningJobsRef,
       where('address', '==', propertyAddress),
       where('preferredDate', '==', cleaningDate.getTime()),
-      where('status', 'in', ['open', 'bidding', 'accepted', 'scheduled'])
+      where('status', 'in', ['open', 'bidding', 'accepted', 'scheduled', 'assigned'])
     );
     
     const existingJobs = await getDocs(existingJobQuery);
@@ -390,7 +412,7 @@ export async function createCleaningJobsFromEvents(
         id: cleaningJobId,
         address: propertyAddress,
         destination: coordinates,
-        status: 'scheduled' as const, // Use 'scheduled' for iCal-created jobs
+        status: primaryCleaner ? 'assigned' : 'scheduled', // Auto-assign if primary cleaner exists
         createdAt: Date.now(),
         hostId: hostId,
         hostFirstName: hostName.split(' ')[0] || '',
@@ -422,6 +444,14 @@ export async function createCleaningJobsFromEvents(
         guestCheckin: event.startDate.toISOString()
       };
       
+      // Auto-assign to primary cleaner if available
+      if (primaryCleaner && primaryCleaner.userId) {
+        cleaningJob.assignedCleanerId = primaryCleaner.userId; // Use actual user ID, not team member ID
+        cleaningJob.assignedCleanerName = primaryCleaner.name;
+        cleaningJob.assignedAt = new Date().toISOString();
+        console.log(`Auto-assigned cleaning job to user ${primaryCleaner.userId} (${primaryCleaner.name})`);
+      }
+      
       // Only add optional fields if they have values (Firebase doesn't allow undefined)
       if (event.reservationUrl) {
         cleaningJob.reservationUrl = event.reservationUrl;
@@ -434,7 +464,7 @@ export async function createCleaningJobsFromEvents(
       await setDoc(doc(cleaningJobsRef, cleaningJobId), cleaningJob);
       jobsCreated++;
       
-      console.log(`Created cleaning job for ${cleaningDate.toLocaleDateString()}`);
+      console.log(`Created cleaning job for ${cleaningDate.toLocaleDateString()}${primaryCleaner ? ` (assigned to ${primaryCleaner.name})` : ''}`);
     }
   }
   

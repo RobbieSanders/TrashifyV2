@@ -23,6 +23,20 @@ import { geocodeAddressCrossPlatform, searchAddresses } from '../services/geocod
 import { geocodeAddressWithFallback } from '../services/googleGeocodingService';
 import { syncPropertyWithICal, syncAllPropertiesWithICal, removeICalCleaningJobs } from '../services/icalService';
 import { syncPropertyICalClient } from '../utils/clientICalSync';
+import { TeamMember } from '../utils/types';
+import { 
+  doc, 
+  updateDoc, 
+  onSnapshot, 
+  collection, 
+  deleteDoc,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  getDoc
+} from 'firebase/firestore';
+import { db } from '../utils/firebase';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -43,7 +57,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
   const [phone, setPhone] = useState(user?.phone || '');
   const [email, setEmail] = useState(user?.email || '');
   const [isSaving, setIsSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'properties' | 'teams' | 'settings'>('overview');
   
   // Properties states
   const { properties, loadProperties, addNewProperty, updateProperty, removeProperty, setAsMain } = useAccountsStore();
@@ -57,11 +71,39 @@ export default function HostProfileScreenModern({ navigation }: any) {
   const [state, setState] = useState('');
   const [zipCode, setZipCode] = useState('');
   const [icalUrl, setIcalUrl] = useState('');
+  const [bedrooms, setBedrooms] = useState('');
+  const [beds, setBeds] = useState('');
+  const [bathrooms, setBathrooms] = useState('');
+  const [unitSize, setUnitSize] = useState('');
+  const [unitSizeUnknown, setUnitSizeUnknown] = useState(false);
   const [addressSuggestions, setAddressSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncingPropertyId, setSyncingPropertyId] = useState<string | null>(null);
+  
+  // Teams states
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+  const [showAssignPropertiesModal, setShowAssignPropertiesModal] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [loading, setLoading] = useState(false);
+  
+  // Job cleanup confirmation states
+  const [showJobCleanupModal, setShowJobCleanupModal] = useState(false);
+  const [jobCleanupType, setJobCleanupType] = useState<'remove_member' | 'unassign_properties'>('remove_member');
+  const [memberToRemove, setMemberToRemove] = useState<TeamMember | null>(null);
+  const [jobsToCleanup, setJobsToCleanup] = useState<any[]>([]);
+  const [propertiesBeingRemoved, setPropertiesBeingRemoved] = useState<string[]>([]);
+  
+  // Form fields for adding team member
+  const [memberName, setMemberName] = useState('');
+  const [memberEmail, setMemberEmail] = useState('');
+  const [memberPhone, setMemberPhone] = useState('');
+  const [memberRole, setMemberRole] = useState<'primary_cleaner' | 'secondary_cleaner' | 'trash_service'>('primary_cleaner');
+  
+  // Property assignment state
+  const [memberProperties, setMemberProperties] = useState<{ [propertyId: string]: boolean }>({});
   
   // Get stats
   const completedJobs = jobs.filter(j => j.hostId === user?.uid && j.status === 'completed').length;
@@ -116,6 +158,25 @@ export default function HostProfileScreenModern({ navigation }: any) {
       subscribeToPropertyJobs(property.address);
     });
   }, [properties, subscribeToPropertyJobs]);
+
+  // Subscribe to team members from subcollection
+  useEffect(() => {
+    if (!db || !user?.uid) return;
+
+    const teamCollectionRef = collection(db, 'users', user.uid, 'teamMembers');
+    const unsubscribe = onSnapshot(teamCollectionRef, (snapshot) => {
+      const members: TeamMember[] = [];
+      snapshot.forEach((doc) => {
+        members.push({ ...doc.data(), id: doc.id } as TeamMember);
+      });
+      setTeamMembers(members);
+    }, (error) => {
+      console.error('[HostProfileScreen] Error loading team:', error);
+      setTeamMembers([]);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   // Parse address components from full address
   const parseAddress = (fullAddress: string) => {
@@ -184,17 +245,14 @@ export default function HostProfileScreenModern({ navigation }: any) {
       if (!geocoded) {
         const fallbackResult = await geocodeAddressCrossPlatform(fullAddress);
         if (fallbackResult) {
-          geocoded = {
-            fullAddress: fallbackResult.fullAddress,
-            streetNumber: fallbackResult.streetNumber,
-            streetName: fallbackResult.streetName,
-            city: fallbackResult.city,
-            state: fallbackResult.state,
-            zipCode: fallbackResult.zipCode,
-            country: fallbackResult.country || 'United States',
-            coordinates: fallbackResult.coordinates,
-            confidence: 'low' as const
-          };
+        geocoded = {
+          fullAddress: fallbackResult.fullAddress,
+          city: fallbackResult.city,
+          state: fallbackResult.state,
+          zipCode: fallbackResult.zipCode,
+          country: fallbackResult.country || 'United States',
+          coordinates: fallbackResult.coordinates
+        };
         }
       }
       
@@ -241,7 +299,12 @@ export default function HostProfileScreenModern({ navigation }: any) {
               address: finalAddress,
               coords: coordinates,
               label: finalLabel,
-              icalUrl: finalIcalUrl || null
+              icalUrl: finalIcalUrl || null,
+              bedrooms: bedrooms ? parseInt(bedrooms) : null,
+              beds: beds ? parseInt(beds) : null,
+              bathrooms: bathrooms ? parseFloat(bathrooms) : null,
+              unitSize: unitSize && !unitSizeUnknown ? parseInt(unitSize) : null,
+              unitSizeUnknown
             }
           );
           propertyId = editingProperty.id;
@@ -273,7 +336,12 @@ export default function HostProfileScreenModern({ navigation }: any) {
             coordinates,
             finalLabel,
             properties.length === 0,
-            finalIcalUrl
+            finalIcalUrl,
+            bedrooms ? parseInt(bedrooms) : undefined,
+            beds ? parseInt(beds) : undefined,
+            bathrooms ? parseFloat(bathrooms) : undefined,
+            unitSize && !unitSizeUnknown ? parseInt(unitSize) : undefined,
+            unitSizeUnknown
           );
           
           // Get the ID of the newly created property
@@ -331,6 +399,11 @@ export default function HostProfileScreenModern({ navigation }: any) {
         setCity('');
         setState('');
         setZipCode('');
+        setBedrooms('');
+        setBeds('');
+        setBathrooms('');
+        setUnitSize('');
+        setUnitSizeUnknown(false);
         setShowAddProperty(false);
         setShowEditProperty(false);
         setIcalUrl('');
@@ -352,6 +425,11 @@ export default function HostProfileScreenModern({ navigation }: any) {
     setState(parsed.state);
     setZipCode(parsed.zip);
     setIcalUrl(property.icalUrl || '');
+    setBedrooms(property.bedrooms ? property.bedrooms.toString() : '');
+    setBeds(property.beds ? property.beds.toString() : '');
+    setBathrooms(property.bathrooms ? property.bathrooms.toString() : '');
+    setUnitSize(property.unitSize ? property.unitSize.toString() : '');
+    setUnitSizeUnknown(property.unitSizeUnknown || false);
     setShowEditProperty(true);
   };
 
@@ -424,6 +502,448 @@ export default function HostProfileScreenModern({ navigation }: any) {
       Alert.alert('Error', 'Failed to sync some calendars');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  // Team management helper functions
+  const getRoleIcon = (role: string) => {
+    switch(role) {
+      case 'primary_cleaner': return 'star';
+      case 'secondary_cleaner': return 'person';
+      case 'trash_service': return 'trash';
+      default: return 'person';
+    }
+  };
+
+  const getRoleColor = (role: string) => {
+    switch(role) {
+      case 'primary_cleaner': return '#10B981';
+      case 'secondary_cleaner': return '#3B82F6';
+      case 'trash_service': return '#8B5CF6';
+      default: return '#64748B';
+    }
+  };
+
+  const getRoleLabel = (role: string) => {
+    switch(role) {
+      case 'primary_cleaner': return 'Primary Cleaner';
+      case 'secondary_cleaner': return 'Secondary Cleaner';
+      case 'trash_service': return 'Trash Service';
+      default: return role;
+    }
+  };
+
+  // Get property name for display
+  const getPropertyName = (propertyId: string) => {
+    const property = properties.find(p => p.id === propertyId);
+    if (!property) return null;
+    return property.label || property.address;
+  };
+  
+  // Filter out orphaned property IDs
+  const getValidPropertyIds = (propertyIds: string[] | undefined) => {
+    if (!propertyIds) return [];
+    return propertyIds.filter(propId => {
+      const property = properties.find(p => p.id === propId);
+      return property !== undefined;
+    });
+  };
+
+  // Open property assignment modal
+  const handleMemberClick = (member: TeamMember) => {
+    if (member.role === 'trash_service') {
+      Alert.alert('Info', 'Trash service members don\'t need property assignments');
+      return;
+    }
+    
+    setSelectedMember(member);
+    
+    // Initialize the checkbox states based on member's current properties
+    const initialProperties: { [propertyId: string]: boolean } = {};
+    if (member.assignedProperties) {
+      member.assignedProperties.forEach(propId => {
+        initialProperties[propId] = true;
+      });
+    }
+    setMemberProperties(initialProperties);
+    setShowAssignPropertiesModal(true);
+  };
+
+  // Add team member to subcollection
+  const handleAddTeamMember = async () => {
+    if (!memberName.trim()) {
+      Alert.alert('Missing Information', 'Please enter team member name');
+      return;
+    }
+
+    if (!memberEmail.trim()) {
+      Alert.alert('Missing Information', 'Please enter team member email - this is required to link them to their user account for job assignments');
+      return;
+    }
+
+    if (!user?.uid) return;
+
+    setLoading(true);
+    try {
+      // Check if there are existing cleaners to determine role
+      let finalRole = memberRole;
+      if (memberRole === 'primary_cleaner' || memberRole === 'secondary_cleaner') {
+        const existingCleaners = teamMembers.filter(m => 
+          m.role === 'primary_cleaner' || m.role === 'secondary_cleaner'
+        );
+        const hasPrimary = existingCleaners.some(m => m.role === 'primary_cleaner');
+        
+        // If adding a cleaner and there's already a primary, make them secondary
+        if (memberRole === 'primary_cleaner' && hasPrimary) {
+          finalRole = 'secondary_cleaner';
+        }
+      }
+
+      // Try to find existing user by email to get their userId
+      let linkedUserId = '';
+      try {
+        const usersRef = collection(db, 'users');
+        const userQuery = query(usersRef, where('email', '==', memberEmail.trim().toLowerCase()));
+        const userSnapshot = await getDocs(userQuery);
+        
+        if (!userSnapshot.empty) {
+          linkedUserId = userSnapshot.docs[0].id;
+          console.log(`Found existing user with email ${memberEmail}: ${linkedUserId}`);
+        } else {
+          console.log(`No existing user found with email ${memberEmail} - they can join later`);
+        }
+      } catch (error) {
+        console.log('Error looking up user by email:', error);
+      }
+
+      const newMemberData: any = {
+        id: `member_${Date.now()}`,
+        userId: linkedUserId, // Link to actual user if found, empty if not
+        name: memberName.trim(),
+        role: finalRole,
+        addedAt: Date.now(),
+        status: 'active',
+        rating: 0,
+        completedJobs: 0,
+        assignedProperties: [],
+        email: memberEmail.trim()
+      };
+
+      // Only add optional fields if they have values
+      if (memberPhone.trim()) {
+        newMemberData.phoneNumber = memberPhone.trim();
+      }
+
+      const teamCollectionRef = collection(db, 'users', user.uid, 'teamMembers');
+      await addDoc(teamCollectionRef, newMemberData);
+
+      const successMessage = linkedUserId 
+        ? `${memberName} has been added to your team as ${getRoleLabel(finalRole)} and linked to their user account!`
+        : `${memberName} has been added to your team as ${getRoleLabel(finalRole)}. They can receive job assignments once they create an account with this email.`;
+
+      Alert.alert('Success', successMessage);
+      setShowAddMemberModal(false);
+      setMemberName('');
+      setMemberEmail('');
+      setMemberPhone('');
+      setMemberRole('primary_cleaner');
+    } catch (error) {
+      console.error('Error adding team member:', error);
+      Alert.alert('Error', 'Failed to add team member');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Remove team member from subcollection
+  const handleRemoveTeamMember = async (memberId: string) => {
+    const member = teamMembers.find(m => m.id === memberId);
+    if (!member || !user?.uid) return;
+
+    // Check if this member has any assigned cleaning jobs
+    let assignedJobs: any[] = [];
+    if (member.userId) {
+      try {
+        const cleaningJobsRef = collection(db, 'cleaningJobs');
+        const assignedJobsQuery = query(
+          cleaningJobsRef,
+          where('assignedCleanerId', '==', member.userId),
+          where('hostId', '==', user.uid),
+          where('status', 'in', ['assigned', 'in_progress', 'scheduled'])
+        );
+        
+        const assignedJobsSnapshot = await getDocs(assignedJobsQuery);
+        assignedJobsSnapshot.docs.forEach(doc => {
+          assignedJobs.push({ id: doc.id, ...doc.data() });
+        });
+      } catch (error) {
+        console.error('Error checking assigned jobs:', error);
+      }
+    }
+
+    if (assignedJobs.length > 0) {
+      // Set up the job cleanup modal for team member removal
+      setJobCleanupType('remove_member');
+      setMemberToRemove(member);
+      setJobsToCleanup(assignedJobs);
+      setShowJobCleanupModal(true);
+    } else {
+      // No assigned jobs, simple removal
+      Alert.alert(
+        'Remove Team Member',
+        `Are you sure you want to remove ${member.name} from your team?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const memberDocRef = doc(db, 'users', user.uid, 'teamMembers', memberId);
+                await deleteDoc(memberDocRef);
+                Alert.alert('Success', `${member.name} removed from team`);
+              } catch (error) {
+                console.error('Error removing team member:', error);
+                Alert.alert('Error', 'Failed to remove team member');
+              }
+            }
+          }
+        ]
+      );
+    }
+  };
+
+  // Toggle member status
+  const handleToggleStatus = async (memberId: string) => {
+    if (!user?.uid) return;
+    
+    const member = teamMembers.find(m => m.id === memberId);
+    if (!member) return;
+    
+    try {
+      const memberDocRef = doc(db, 'users', user.uid, 'teamMembers', memberId);
+      await updateDoc(memberDocRef, {
+        status: member.status === 'active' ? 'inactive' : 'active'
+      });
+    } catch (error) {
+      console.error('Error toggling member status:', error);
+      Alert.alert('Error', 'Failed to update member status');
+    }
+  };
+
+  // Save property assignments
+  const handleSavePropertyAssignments = async () => {
+    if (!user?.uid || !selectedMember) return;
+    
+    const newAssignedProperties = Object.keys(memberProperties).filter(propId => memberProperties[propId]);
+    const previousAssignedProperties = selectedMember.assignedProperties || [];
+    const removedProperties = previousAssignedProperties.filter(propId => !newAssignedProperties.includes(propId));
+    
+    // Check if there are jobs assigned to this member for the removed properties
+    let hasJobsOnRemovedProperties = false;
+    let jobsOnRemovedProperties: any[] = [];
+    
+    if (removedProperties.length > 0 && selectedMember.userId) {
+      try {
+        for (const propertyId of removedProperties) {
+          const property = properties.find(p => p.id === propertyId);
+          if (property) {
+            const cleaningJobsRef = collection(db, 'cleaningJobs');
+            const assignedJobsQuery = query(
+              cleaningJobsRef,
+              where('address', '==', property.address),
+              where('assignedCleanerId', '==', selectedMember.userId),
+              where('hostId', '==', user.uid),
+              where('status', 'in', ['assigned', 'in_progress', 'scheduled'])
+            );
+            
+            const assignedJobsSnapshot = await getDocs(assignedJobsQuery);
+            if (!assignedJobsSnapshot.empty) {
+              hasJobsOnRemovedProperties = true;
+              assignedJobsSnapshot.docs.forEach(doc => {
+                jobsOnRemovedProperties.push({ id: doc.id, ...doc.data(), propertyAddress: property.address });
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking jobs on removed properties:', error);
+      }
+    }
+    
+    // If there are jobs on removed properties, ask user what to do
+    if (hasJobsOnRemovedProperties) {
+      // Set up the job cleanup modal for property unassignment
+      setJobCleanupType('unassign_properties');
+      setJobsToCleanup(jobsOnRemovedProperties);
+      setPropertiesBeingRemoved(newAssignedProperties);
+      setShowJobCleanupModal(true);
+    } else {
+      // No jobs to worry about, proceed normally
+      await savePropertyAssignmentsWithoutJobCleanup(newAssignedProperties);
+    }
+  };
+
+  // Helper function to save property assignments without job cleanup
+  const savePropertyAssignmentsWithoutJobCleanup = async (newAssignedProperties: string[]) => {
+    if (!user?.uid || !selectedMember) return;
+    
+    setLoading(true);
+    try {
+      const previousAssignedProperties = selectedMember.assignedProperties || [];
+      
+      // Update team member's assigned properties
+      const memberDocRef = doc(db, 'users', user.uid, 'teamMembers', selectedMember.id);
+      await updateDoc(memberDocRef, {
+        assignedProperties: newAssignedProperties
+      });
+      
+      // If this is a primary cleaner, auto-assign them to existing unassigned cleaning jobs
+      if (selectedMember.role === 'primary_cleaner') {
+        const newlyAssignedProperties = newAssignedProperties.filter(propId => !previousAssignedProperties.includes(propId));
+        
+        for (const propertyId of newlyAssignedProperties) {
+          const property = properties.find(p => p.id === propertyId);
+          if (property) {
+            try {
+              // Find unassigned cleaning jobs for this property
+              const cleaningJobsRef = collection(db, 'cleaningJobs');
+              const unassignedJobsQuery = query(
+                cleaningJobsRef,
+                where('address', '==', property.address),
+                where('hostId', '==', user.uid),
+                where('status', 'in', ['scheduled', 'open'])
+              );
+              
+              const unassignedJobsSnapshot = await getDocs(unassignedJobsQuery);
+              let jobsAssigned = 0;
+              
+              for (const jobDoc of unassignedJobsSnapshot.docs) {
+                const job = jobDoc.data();
+                // Only assign if not already assigned to someone
+                if (!job.assignedCleanerId && selectedMember.userId) {
+                  await updateDoc(doc(db, 'cleaningJobs', jobDoc.id), {
+                    assignedCleanerId: selectedMember.userId, // Use actual user ID, not team member ID
+                    assignedCleanerName: selectedMember.name,
+                    status: 'assigned',
+                    assignedAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                  });
+                  jobsAssigned++;
+                }
+              }
+              
+              if (jobsAssigned > 0) {
+                console.log(`Auto-assigned ${jobsAssigned} existing cleaning jobs to ${selectedMember.name} for property ${property.address}`);
+              }
+            } catch (error) {
+              console.error(`Error auto-assigning jobs for property ${property.address}:`, error);
+            }
+          }
+        }
+      }
+      
+      Alert.alert('Success', `Properties assigned to ${selectedMember.name}`);
+      setShowAssignPropertiesModal(false);
+      setSelectedMember(null);
+      setMemberProperties({});
+    } catch (error) {
+      console.error('Error assigning properties:', error);
+      Alert.alert('Error', 'Failed to assign properties');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper function to save property assignments with job cleanup
+  const savePropertyAssignmentsWithJobCleanup = async (newAssignedProperties: string[], jobsToUnassign: any[]) => {
+    if (!user?.uid || !selectedMember) return;
+    
+    setLoading(true);
+    try {
+      const previousAssignedProperties = selectedMember.assignedProperties || [];
+      
+      // Update team member's assigned properties
+      const memberDocRef = doc(db, 'users', user.uid, 'teamMembers', selectedMember.id);
+      await updateDoc(memberDocRef, {
+        assignedProperties: newAssignedProperties
+      });
+      
+      // Remove cleaner from jobs on removed properties
+      let jobsUnassigned = 0;
+      for (const job of jobsToUnassign) {
+        try {
+          await updateDoc(doc(db, 'cleaningJobs', job.id), {
+            assignedCleanerId: null,
+            assignedCleanerName: null,
+            status: 'scheduled',
+            assignedAt: null,
+            updatedAt: new Date().toISOString()
+          });
+          jobsUnassigned++;
+        } catch (error) {
+          console.error(`Error unassigning job ${job.id}:`, error);
+        }
+      }
+      
+      // If this is a primary cleaner, auto-assign them to existing unassigned cleaning jobs for newly assigned properties
+      if (selectedMember.role === 'primary_cleaner') {
+        const newlyAssignedProperties = newAssignedProperties.filter(propId => !previousAssignedProperties.includes(propId));
+        
+        for (const propertyId of newlyAssignedProperties) {
+          const property = properties.find(p => p.id === propertyId);
+          if (property) {
+            try {
+              // Find unassigned cleaning jobs for this property
+              const cleaningJobsRef = collection(db, 'cleaningJobs');
+              const unassignedJobsQuery = query(
+                cleaningJobsRef,
+                where('address', '==', property.address),
+                where('hostId', '==', user.uid),
+                where('status', 'in', ['scheduled', 'open'])
+              );
+              
+              const unassignedJobsSnapshot = await getDocs(unassignedJobsQuery);
+              let jobsAssigned = 0;
+              
+              for (const jobDoc of unassignedJobsSnapshot.docs) {
+                const job = jobDoc.data();
+                // Only assign if not already assigned to someone
+                if (!job.assignedCleanerId && selectedMember.userId) {
+                  await updateDoc(doc(db, 'cleaningJobs', jobDoc.id), {
+                    assignedCleanerId: selectedMember.userId, // Use actual user ID, not team member ID
+                    assignedCleanerName: selectedMember.name,
+                    status: 'assigned',
+                    assignedAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                  });
+                  jobsAssigned++;
+                }
+              }
+              
+              if (jobsAssigned > 0) {
+                console.log(`Auto-assigned ${jobsAssigned} existing cleaning jobs to ${selectedMember.name} for property ${property.address}`);
+              }
+            } catch (error) {
+              console.error(`Error auto-assigning jobs for property ${property.address}:`, error);
+            }
+          }
+        }
+      }
+      
+      const message = jobsUnassigned > 0 
+        ? `Properties updated for ${selectedMember.name} and unassigned from ${jobsUnassigned} cleaning job${jobsUnassigned !== 1 ? 's' : ''}`
+        : `Properties assigned to ${selectedMember.name}`;
+      
+      Alert.alert('Success', message);
+      setShowAssignPropertiesModal(false);
+      setSelectedMember(null);
+      setMemberProperties({});
+    } catch (error) {
+      console.error('Error assigning properties:', error);
+      Alert.alert('Error', 'Failed to assign properties');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -908,6 +1428,12 @@ export default function HostProfileScreenModern({ navigation }: any) {
           style={[styles.tab, activeTab === 'overview' ? styles.activeTab : null]}
           onPress={() => setActiveTab('overview')}
         >
+          <Ionicons 
+            name="home" 
+            size={16} 
+            color={activeTab === 'overview' ? '#fff' : '#666'} 
+            style={{ marginBottom: 4 }}
+          />
           <Text style={[styles.tabText, activeTab === 'overview' ? styles.activeTabText : null]}>
             Overview
           </Text>
@@ -916,14 +1442,40 @@ export default function HostProfileScreenModern({ navigation }: any) {
           style={[styles.tab, activeTab === 'properties' ? styles.activeTab : null]}
           onPress={() => setActiveTab('properties')}
         >
+          <Ionicons 
+            name="business" 
+            size={16} 
+            color={activeTab === 'properties' ? '#fff' : '#666'} 
+            style={{ marginBottom: 4 }}
+          />
           <Text style={[styles.tabText, activeTab === 'properties' ? styles.activeTabText : null]}>
             Properties
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'teams' ? styles.activeTab : null]}
+          onPress={() => setActiveTab('teams')}
+        >
+          <Ionicons 
+            name="people" 
+            size={16} 
+            color={activeTab === 'teams' ? '#fff' : '#666'} 
+            style={{ marginBottom: 4 }}
+          />
+          <Text style={[styles.tabText, activeTab === 'teams' ? styles.activeTabText : null]}>
+            My Teams
           </Text>
         </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.tab, activeTab === 'settings' ? styles.activeTab : null]}
           onPress={() => setActiveTab('settings')}
         >
+          <Ionicons 
+            name="settings" 
+            size={16} 
+            color={activeTab === 'settings' ? '#fff' : '#666'} 
+            style={{ marginBottom: 4 }}
+          />
           <Text style={[styles.tabText, activeTab === 'settings' ? styles.activeTabText : null]}>
             Settings
           </Text>
@@ -931,7 +1483,11 @@ export default function HostProfileScreenModern({ navigation }: any) {
       </View>
       
       {/* Content */}
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: Platform.OS === 'ios' ? 100 : 80 }}
+      >
         {activeTab === 'overview' ? (
           <Animated.View style={{ opacity: fadeAnim }}>
             <View style={styles.sectionCard}>
@@ -1091,6 +1647,289 @@ export default function HostProfileScreenModern({ navigation }: any) {
           </Animated.View>
         ) : null}
         
+        {activeTab === 'teams' ? (
+          <Animated.View style={{ opacity: fadeAnim }}>
+            <View style={styles.sectionCard}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <Text style={styles.sectionTitle}>My Team</Text>
+                <TouchableOpacity 
+                  style={[styles.addButton, { marginTop: 0, paddingVertical: 10, paddingHorizontal: 16 }]}
+                  onPress={() => setShowAddMemberModal(true)}
+                >
+                  <Ionicons name="person-add" size={16} color="#fff" />
+                  <Text style={[styles.addButtonText, { fontSize: 14 }]}>Add Member</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Primary Cleaners Section */}
+              {teamMembers.filter(m => m.role === 'primary_cleaner').length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                    <Ionicons name="star" size={16} color="#10B981" style={{ marginRight: 8 }} />
+                    <Text style={[styles.label, { fontSize: 14, marginBottom: 0, color: '#10B981' }]}>
+                      Primary Cleaners ({teamMembers.filter(m => m.role === 'primary_cleaner').length})
+                    </Text>
+                  </View>
+                  
+                  {teamMembers.filter(m => m.role === 'primary_cleaner').map(member => (
+                    <TouchableOpacity 
+                      key={member.id} 
+                      style={[styles.propertyCard, { marginBottom: 8 }]}
+                      onPress={() => handleMemberClick(member)}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={[styles.closeButton, { 
+                          backgroundColor: getRoleColor(member.role), 
+                          marginRight: 12,
+                          width: 28,
+                          height: 28
+                        }]}>
+                          <Ionicons name={getRoleIcon(member.role) as any} size={14} color="white" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={[styles.propertyLabel, { fontSize: 15 }]}>{member.name}</Text>
+                            <Ionicons name="chevron-forward" size={14} color="#CBD5E1" style={{ marginLeft: 6 }} />
+                          </View>
+                          {member.email && <Text style={[styles.propertyAddress, { fontSize: 12 }]}>{member.email}</Text>}
+                          {member.phoneNumber && <Text style={[styles.propertyAddress, { fontSize: 12 }]}>{member.phoneNumber}</Text>}
+                          {(() => {
+                            const validProperties = getValidPropertyIds(member.assignedProperties);
+                            if (validProperties.length === 0) return null;
+                            
+                            return (
+                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 }}>
+                                {validProperties.slice(0, 2).map(propId => {
+                                  const propertyName = getPropertyName(propId);
+                                  if (!propertyName) return null;
+                                  
+                                  return (
+                                    <View key={propId} style={{
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      backgroundColor: '#F0FDF4',
+                                      paddingHorizontal: 6,
+                                      paddingVertical: 2,
+                                      borderRadius: 8,
+                                      marginRight: 4,
+                                      marginBottom: 2,
+                                      borderWidth: 1,
+                                      borderColor: '#DCFCE7',
+                                    }}>
+                                      <Ionicons name="home" size={8} color="#10B981" />
+                                      <Text style={{ fontSize: 10, color: '#10B981', marginLeft: 2 }}>
+                                        {propertyName}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
+                                {validProperties.length > 2 && (
+                                  <Text style={{ fontSize: 10, color: '#64748B', paddingVertical: 2 }}>
+                                    +{validProperties.length - 2} more
+                                  </Text>
+                                )}
+                              </View>
+                            );
+                          })()}
+                        </View>
+                        
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={[
+                            styles.mainBadge, 
+                            { backgroundColor: member.status === 'active' ? '#DCFCE7' : '#FEE2E2' }
+                          ]}>
+                            <Text style={[
+                              styles.mainBadgeText, 
+                              { color: member.status === 'active' ? '#166534' : '#DC2626' }
+                            ]}>
+                              {member.status === 'active' ? 'Active' : 'Inactive'}
+                            </Text>
+                          </View>
+                          
+                          <TouchableOpacity onPress={() => handleRemoveTeamMember(member.id)}>
+                            <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Secondary Cleaners Section */}
+              {teamMembers.filter(m => m.role === 'secondary_cleaner').length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                    <Ionicons name="person" size={16} color="#3B82F6" style={{ marginRight: 8 }} />
+                    <Text style={[styles.label, { fontSize: 14, marginBottom: 0, color: '#3B82F6' }]}>
+                      Secondary Cleaners ({teamMembers.filter(m => m.role === 'secondary_cleaner').length})
+                    </Text>
+                  </View>
+                  
+                  {teamMembers.filter(m => m.role === 'secondary_cleaner').map(member => (
+                    <TouchableOpacity 
+                      key={member.id} 
+                      style={[styles.propertyCard, { marginBottom: 8 }]}
+                      onPress={() => handleMemberClick(member)}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={[styles.closeButton, { 
+                          backgroundColor: getRoleColor(member.role), 
+                          marginRight: 12,
+                          width: 28,
+                          height: 28
+                        }]}>
+                          <Ionicons name={getRoleIcon(member.role) as any} size={14} color="white" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={[styles.propertyLabel, { fontSize: 15 }]}>{member.name}</Text>
+                            <Ionicons name="chevron-forward" size={14} color="#CBD5E1" style={{ marginLeft: 6 }} />
+                          </View>
+                          {member.email && <Text style={[styles.propertyAddress, { fontSize: 12 }]}>{member.email}</Text>}
+                          {member.phoneNumber && <Text style={[styles.propertyAddress, { fontSize: 12 }]}>{member.phoneNumber}</Text>}
+                          {(() => {
+                            const validProperties = getValidPropertyIds(member.assignedProperties);
+                            if (validProperties.length === 0) return null;
+                            
+                            return (
+                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 }}>
+                                {validProperties.slice(0, 2).map(propId => {
+                                  const propertyName = getPropertyName(propId);
+                                  if (!propertyName) return null;
+                                  
+                                  return (
+                                    <View key={propId} style={{
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      backgroundColor: '#EFF6FF',
+                                      paddingHorizontal: 6,
+                                      paddingVertical: 2,
+                                      borderRadius: 8,
+                                      marginRight: 4,
+                                      marginBottom: 2,
+                                      borderWidth: 1,
+                                      borderColor: '#DBEAFE',
+                                    }}>
+                                      <Ionicons name="home" size={8} color="#3B82F6" />
+                                      <Text style={{ fontSize: 10, color: '#3B82F6', marginLeft: 2 }}>
+                                        {propertyName}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
+                                {validProperties.length > 2 && (
+                                  <Text style={{ fontSize: 10, color: '#64748B', paddingVertical: 2 }}>
+                                    +{validProperties.length - 2} more
+                                  </Text>
+                                )}
+                              </View>
+                            );
+                          })()}
+                        </View>
+                        
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={[
+                            styles.mainBadge, 
+                            { backgroundColor: member.status === 'active' ? '#DCFCE7' : '#FEE2E2' }
+                          ]}>
+                            <Text style={[
+                              styles.mainBadgeText, 
+                              { color: member.status === 'active' ? '#166534' : '#DC2626' }
+                            ]}>
+                              {member.status === 'active' ? 'Active' : 'Inactive'}
+                            </Text>
+                          </View>
+                          
+                          <TouchableOpacity onPress={() => handleRemoveTeamMember(member.id)}>
+                            <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Trash Services Section */}
+              {teamMembers.filter(m => m.role === 'trash_service').length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                    <Ionicons name="trash" size={16} color="#8B5CF6" style={{ marginRight: 8 }} />
+                    <Text style={[styles.label, { fontSize: 14, marginBottom: 0, color: '#8B5CF6' }]}>
+                      Trash Services ({teamMembers.filter(m => m.role === 'trash_service').length})
+                    </Text>
+                  </View>
+                  
+                  {teamMembers.filter(m => m.role === 'trash_service').map(member => (
+                    <View key={member.id} style={[styles.propertyCard, { marginBottom: 8 }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={[styles.closeButton, { 
+                          backgroundColor: getRoleColor(member.role), 
+                          marginRight: 12,
+                          width: 28,
+                          height: 28
+                        }]}>
+                          <Ionicons name={getRoleIcon(member.role) as any} size={14} color="white" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.propertyLabel, { fontSize: 15 }]}>{member.name}</Text>
+                          {member.email && <Text style={[styles.propertyAddress, { fontSize: 12 }]}>{member.email}</Text>}
+                          {member.phoneNumber && <Text style={[styles.propertyAddress, { fontSize: 12 }]}>{member.phoneNumber}</Text>}
+                        </View>
+                        
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={[
+                            styles.mainBadge, 
+                            { backgroundColor: member.status === 'active' ? '#DCFCE7' : '#FEE2E2' }
+                          ]}>
+                            <Text style={[
+                              styles.mainBadgeText, 
+                              { color: member.status === 'active' ? '#166534' : '#DC2626' }
+                            ]}>
+                              {member.status === 'active' ? 'Active' : 'Inactive'}
+                            </Text>
+                          </View>
+                          
+                          <TouchableOpacity onPress={() => handleRemoveTeamMember(member.id)}>
+                            <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Empty State */}
+              {teamMembers.length === 0 && (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIcon}>
+                    <Ionicons name="people-outline" size={40} color="#999" />
+                  </View>
+                  <Text style={styles.emptyText}>No team members yet</Text>
+                  <Text style={styles.emptySubtext}>Add your first team member to get started</Text>
+                </View>
+              )}
+              
+              {/* Tip */}
+              <View style={{ 
+                flexDirection: 'row', 
+                alignItems: 'center', 
+                backgroundColor: '#F8FAFC', 
+                padding: 12, 
+                borderRadius: 8,
+                marginTop: 16
+              }}>
+                <Ionicons name="information-circle" size={16} color="#64748B" />
+                <Text style={{ fontSize: 12, color: '#64748B', marginLeft: 8, flex: 1 }}>
+                  Tap cleaner names to assign properties. Primary cleaners get automatic job assignments.
+                </Text>
+              </View>
+            </View>
+          </Animated.View>
+        ) : null}
+
         {activeTab === 'settings' ? (
           <Animated.View style={{ opacity: fadeAnim }}>
             <View style={styles.sectionCard}>
@@ -1274,6 +2113,105 @@ export default function HostProfileScreenModern({ navigation }: any) {
                 </View>
               ) : null}
 
+              {/* Property Details Section */}
+              <View style={{ marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: '#E5E7EB' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <Ionicons name="home-outline" size={16} color="#4A90E2" style={{ marginRight: 6 }} />
+                  <Text style={[styles.label, { marginBottom: 0 }]}>Property Details (Optional)</Text>
+                </View>
+                <Text style={styles.icalHint}>
+                  Add property details to help cleaners understand the scope of work
+                </Text>
+                
+                <View style={{ flexDirection: 'row', marginTop: 12 }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.label, { fontSize: 11, marginBottom: 4 }]}>Bedrooms</Text>
+                    <TextInput
+                      style={[styles.input, { fontSize: 14, paddingVertical: 10 }]}
+                      value={bedrooms}
+                      onChangeText={setBedrooms}
+                      placeholder="2"
+                      keyboardType="numeric"
+                      placeholderTextColor="#999"
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginHorizontal: 4 }}>
+                    <Text style={[styles.label, { fontSize: 11, marginBottom: 4 }]}>Beds</Text>
+                    <TextInput
+                      style={[styles.input, { fontSize: 14, paddingVertical: 10 }]}
+                      value={beds}
+                      onChangeText={setBeds}
+                      placeholder="3"
+                      keyboardType="numeric"
+                      placeholderTextColor="#999"
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={[styles.label, { fontSize: 11, marginBottom: 4 }]}>Bathrooms</Text>
+                    <TextInput
+                      style={[styles.input, { fontSize: 14, paddingVertical: 10 }]}
+                      value={bathrooms}
+                      onChangeText={setBathrooms}
+                      placeholder="2.5"
+                      keyboardType="numeric"
+                      placeholderTextColor="#999"
+                    />
+                  </View>
+                </View>
+                
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.label, { fontSize: 11, marginBottom: 4 }]}>Unit Size</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <TextInput
+                      style={[
+                        styles.input, 
+                        { 
+                          flex: 1, 
+                          fontSize: 14, 
+                          paddingVertical: 10,
+                          backgroundColor: unitSizeUnknown ? '#f0f0f0' : '#f8f9fa',
+                          opacity: unitSizeUnknown ? 0.6 : 1
+                        }
+                      ]}
+                      value={unitSize}
+                      onChangeText={setUnitSize}
+                      placeholder="1200"
+                      keyboardType="numeric"
+                      editable={!unitSizeUnknown}
+                      placeholderTextColor="#999"
+                    />
+                    <Text style={{ fontSize: 14, color: '#666', marginLeft: 8, marginRight: 12 }}>sq ft</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setUnitSizeUnknown(!unitSizeUnknown);
+                        if (!unitSizeUnknown) {
+                          setUnitSize('');
+                        }
+                      }}
+                      style={{
+                        width: 50,
+                        height: 28,
+                        borderRadius: 14,
+                        backgroundColor: unitSizeUnknown ? '#4A90E2' : '#E5E7EB',
+                        padding: 2,
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <View style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 12,
+                        backgroundColor: 'white',
+                        transform: [{ translateX: unitSizeUnknown ? 22 : 0 }],
+                      }} />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={{ fontSize: 10, color: '#64748B', marginTop: 4 }}>
+                    Toggle if you don't know the unit size
+                  </Text>
+                </View>
+              </View>
+
               {/* iCal Calendar URL Section */}
               <View style={styles.icalSection}>
                 <View style={styles.icalHeader}>
@@ -1325,6 +2263,11 @@ export default function HostProfileScreenModern({ navigation }: any) {
                   setState('');
                   setZipCode('');
                   setIcalUrl('');
+                  setBedrooms('');
+                  setBeds('');
+                  setBathrooms('');
+                  setUnitSize('');
+                  setUnitSizeUnknown(false);
                   setAddressSuggestions([]);
                   setShowSuggestions(false);
                 }}
@@ -1348,6 +2291,460 @@ export default function HostProfileScreenModern({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* Add Team Member Modal */}
+      <Modal
+        visible={showAddMemberModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAddMemberModal(false)}
+      >
+        <View style={styles.modal}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Team Member</Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowAddMemberModal(false)}
+              >
+                <Ionicons name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Role</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {(['primary_cleaner', 'secondary_cleaner', 'trash_service'] as const).map(role => (
+                    <TouchableOpacity
+                      key={role}
+                      style={[
+                        styles.actionButton,
+                        { 
+                          flex: 1, 
+                          flexDirection: 'column',
+                          paddingVertical: 12,
+                          backgroundColor: memberRole === role ? '#4A90E2' : '#f8f9fa',
+                          borderWidth: 1,
+                          borderColor: memberRole === role ? '#4A90E2' : '#e0e0e0'
+                        }
+                      ]}
+                      onPress={() => setMemberRole(role)}
+                    >
+                      <Ionicons 
+                        name={getRoleIcon(role) as any} 
+                        size={16} 
+                        color={memberRole === role ? 'white' : '#64748B'} 
+                        style={{ marginBottom: 4 }}
+                      />
+                      <Text style={[
+                        styles.actionButtonText,
+                        { 
+                          fontSize: 11,
+                          color: memberRole === role ? 'white' : '#64748B',
+                          textAlign: 'center'
+                        }
+                      ]}>
+                        {getRoleLabel(role)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Name *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberName}
+                  onChangeText={setMemberName}
+                  placeholder="Enter member name"
+                  placeholderTextColor="#999"
+                />
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Email *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberEmail}
+                  onChangeText={setMemberEmail}
+                  placeholder="member@example.com (required for job assignments)"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  placeholderTextColor="#999"
+                />
+                <Text style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>
+                  Email is required to link this team member to their user account for job assignments
+                </Text>
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Phone</Text>
+                <TextInput
+                  style={styles.input}
+                  value={memberPhone}
+                  onChangeText={setMemberPhone}
+                  placeholder="(123) 456-7890"
+                  keyboardType="phone-pad"
+                  placeholderTextColor="#999"
+                />
+              </View>
+            </ScrollView>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => {
+                  setShowAddMemberModal(false);
+                  setMemberName('');
+                  setMemberEmail('');
+                  setMemberPhone('');
+                  setMemberRole('primary_cleaner');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.submitButton]}
+                onPress={handleAddTeamMember}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Add to Team</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Property Assignment Modal */}
+      <Modal
+        visible={showAssignPropertiesModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAssignPropertiesModal(false)}
+      >
+        <View style={styles.modal}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Assign Properties</Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowAssignPropertiesModal(false)}
+              >
+                <Ionicons name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            {selectedMember && (
+              <>
+                <View style={[styles.propertyCard, { marginBottom: 16 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={[styles.closeButton, { 
+                      backgroundColor: getRoleColor(selectedMember.role), 
+                      marginRight: 12,
+                      width: 28,
+                      height: 28
+                    }]}>
+                      <Ionicons name={getRoleIcon(selectedMember.role) as any} size={14} color="white" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.propertyLabel, { fontSize: 15 }]}>{selectedMember.name}</Text>
+                      <Text style={[styles.propertyAddress, { fontSize: 12 }]}>{getRoleLabel(selectedMember.role)}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {selectedMember.role === 'secondary_cleaner' && (
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'flex-start',
+                    backgroundColor: '#EFF6FF',
+                    padding: 12,
+                    borderRadius: 8,
+                    marginBottom: 16,
+                  }}>
+                    <Ionicons name="information-circle" size={16} color="#3B82F6" />
+                    <Text style={{
+                      fontSize: 12,
+                      color: '#3B82F6',
+                      marginLeft: 8,
+                      flex: 1,
+                    }}>
+                      Secondary cleaners are backups and won't see cleaning jobs unless reassigned as primary.
+                    </Text>
+                  </View>
+                )}
+
+                <ScrollView style={{ maxHeight: 300, marginBottom: 16 }}>
+                  {properties.length === 0 ? (
+                    <Text style={[styles.emptyText, { textAlign: 'center', paddingVertical: 20 }]}>
+                      No properties available. Add properties first.
+                    </Text>
+                  ) : (
+                    properties.map(property => (
+                      <TouchableOpacity
+                        key={property.id}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingVertical: 12,
+                          borderBottomWidth: 1,
+                          borderBottomColor: '#F3F4F6',
+                        }}
+                        onPress={() => {
+                          setMemberProperties(prev => ({
+                            ...prev,
+                            [property.id]: !prev[property.id]
+                          }));
+                        }}
+                      >
+                        <View style={{
+                          width: 20,
+                          height: 20,
+                          borderWidth: 2,
+                          borderColor: memberProperties[property.id] ? '#4A90E2' : '#CBD5E1',
+                          borderRadius: 4,
+                          marginRight: 12,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          backgroundColor: memberProperties[property.id] ? '#4A90E2' : 'transparent',
+                        }}>
+                          {memberProperties[property.id] && (
+                            <Ionicons name="checkmark" size={12} color="white" />
+                          )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.propertyLabel, { fontSize: 14 }]}>{property.label || 'Property'}</Text>
+                          <Text style={[styles.propertyAddress, { fontSize: 12 }]}>{property.address}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </ScrollView>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.cancelButton]}
+                    onPress={() => {
+                      setShowAssignPropertiesModal(false);
+                      setSelectedMember(null);
+                      setMemberProperties({});
+                    }}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.submitButton]}
+                    onPress={handleSavePropertyAssignments}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>Save Assignments</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Job Cleanup Confirmation Modal */}
+      <Modal
+        visible={showJobCleanupModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowJobCleanupModal(false)}
+      >
+        <View style={styles.modal}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {jobCleanupType === 'remove_member' ? 'Remove Team Member' : 'Update Property Assignments'}
+              </Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowJobCleanupModal(false)}
+              >
+                <Ionicons name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={{ marginBottom: 20 }}>
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#FEF3C7',
+                padding: 16,
+                borderRadius: 12,
+                marginBottom: 16,
+              }}>
+                <Ionicons name="warning" size={24} color="#D97706" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#92400E', marginBottom: 4 }}>
+                    Cleaning Jobs Found
+                  </Text>
+                  <Text style={{ fontSize: 14, color: '#92400E', lineHeight: 20 }}>
+                    {jobCleanupType === 'remove_member' 
+                      ? `${memberToRemove?.name || 'This team member'} is currently assigned to ${jobsToCleanup.length} cleaning job${jobsToCleanup.length !== 1 ? 's' : ''}. Choose how to handle these assignments:`
+                      : `${selectedMember?.name || 'This team member'} is currently assigned to ${jobsToCleanup.length} cleaning job${jobsToCleanup.length !== 1 ? 's' : ''} on properties being removed. Choose how to handle these assignments:`
+                    }
+                  </Text>
+                </View>
+              </View>
+
+              {/* Show some job details */}
+              <View style={{ backgroundColor: '#F8FAFC', borderRadius: 8, padding: 12, marginBottom: 16 }}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#64748B', marginBottom: 8 }}>
+                  AFFECTED CLEANING JOBS ({jobsToCleanup.length})
+                </Text>
+                {jobsToCleanup.slice(0, 3).map((job, index) => (
+                  <View key={job.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                    <Ionicons name="calendar-outline" size={12} color="#64748B" />
+                    <Text style={{ fontSize: 12, color: '#64748B', marginLeft: 6 }}>
+                      {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'No date'} - {job.address || 'Unknown address'}
+                    </Text>
+                  </View>
+                ))}
+                {jobsToCleanup.length > 3 && (
+                  <Text style={{ fontSize: 12, color: '#64748B', fontStyle: 'italic' }}>
+                    ...and {jobsToCleanup.length - 3} more
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setShowJobCleanupModal(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalButton, { backgroundColor: '#3B82F6' }]}
+                onPress={async () => {
+                  setShowJobCleanupModal(false);
+                  if (jobCleanupType === 'remove_member') {
+                    await handleRemoveMemberKeepJobs();
+                  } else {
+                    await savePropertyAssignmentsWithoutJobCleanup(propertiesBeingRemoved);
+                  }
+                }}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={[styles.submitButtonText, { color: '#fff' }]}>
+                    {jobCleanupType === 'remove_member' 
+                      ? 'Remove from team only' 
+                      : 'Keep job assignments'
+                    }
+                  </Text>
+                )}
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalButton, { backgroundColor: '#EF4444' }]}
+                onPress={async () => {
+                  setShowJobCleanupModal(false);
+                  if (jobCleanupType === 'remove_member') {
+                    await handleRemoveMemberAndJobs();
+                  } else {
+                    await savePropertyAssignmentsWithJobCleanup(propertiesBeingRemoved, jobsToCleanup);
+                  }
+                }}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={[styles.submitButtonText, { color: '#fff' }]}>
+                    {jobCleanupType === 'remove_member' 
+                      ? 'Remove from team & jobs' 
+                      : 'Remove from jobs too'
+                    }
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
+
+  // Handler functions for job cleanup modal
+  const handleRemoveMemberKeepJobs = async () => {
+    if (!user?.uid || !memberToRemove) return;
+    
+    setLoading(true);
+    try {
+      const memberDocRef = doc(db, 'users', user.uid, 'teamMembers', memberToRemove.id);
+      await deleteDoc(memberDocRef);
+      Alert.alert('Success', `${memberToRemove.name} removed from team. Their assigned jobs remain unchanged.`);
+    } catch (error) {
+      console.error('Error removing team member:', error);
+      Alert.alert('Error', 'Failed to remove team member');
+    } finally {
+      setLoading(false);
+      setMemberToRemove(null);
+      setJobsToCleanup([]);
+    }
+  };
+
+  const handleRemoveMemberAndJobs = async () => {
+    if (!user?.uid || !memberToRemove) return;
+    
+    setLoading(true);
+    try {
+      // Remove from team
+      const memberDocRef = doc(db, 'users', user.uid, 'teamMembers', memberToRemove.id);
+      await deleteDoc(memberDocRef);
+      
+      // Remove from all assigned jobs
+      if (memberToRemove.userId) {
+        const cleaningJobsRef = collection(db, 'cleaningJobs');
+        const assignedJobsQuery = query(
+          cleaningJobsRef,
+          where('assignedCleanerId', '==', memberToRemove.userId),
+          where('hostId', '==', user.uid)
+        );
+        
+        const assignedJobsSnapshot = await getDocs(assignedJobsQuery);
+        let jobsUpdated = 0;
+        
+        for (const jobDoc of assignedJobsSnapshot.docs) {
+          await updateDoc(doc(db, 'cleaningJobs', jobDoc.id), {
+            assignedCleanerId: null,
+            assignedCleanerName: null,
+            status: 'scheduled',
+            assignedAt: null,
+            updatedAt: new Date().toISOString()
+          });
+          jobsUpdated++;
+        }
+        
+        Alert.alert('Success', `${memberToRemove.name} removed from team and unassigned from ${jobsUpdated} cleaning job${jobsUpdated !== 1 ? 's' : ''}.`);
+      } else {
+        Alert.alert('Success', `${memberToRemove.name} removed from team.`);
+      }
+    } catch (error) {
+      console.error('Error removing team member and jobs:', error);
+      Alert.alert('Error', 'Failed to remove team member');
+    } finally {
+      setLoading(false);
+      setMemberToRemove(null);
+      setJobsToCleanup([]);
+    }
+  };
 }

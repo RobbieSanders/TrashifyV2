@@ -139,12 +139,19 @@ export interface CleanerRecruitment {
     unitSize?: number; // square feet
     unitSizeUnknown?: boolean; // If they don't know the size
     label?: string; // Property name/label
+    coordinates?: Coordinates; // Pre-geocoded coordinates to avoid re-geocoding
   }>;
   
   // Team recruitment details
   servicesNeeded?: string[]; // Types of cleaning services needed
   notes?: string; // Additional notes about what the host is looking for
   title?: string; // Optional title for the recruitment post
+  
+  // New fields for cleaner information
+  estimatedTurnoversPerMonth?: number; // 1-10 or 11+ (represented as 11)
+  estimatedCleaningTimeHours?: number; // 1-10 or 11+ (represented as 11)
+  cleanerWillProvideSupplies?: boolean; // Checkbox: provide cleaning supplies
+  cleanerWillWashLinens?: boolean; // Checkbox: wash and dry linens + towels
   
   status: 'open' | 'closed' | 'filled';
   createdAt: number;
@@ -249,6 +256,12 @@ export interface CleanerProfile {
   yearsExperience?: number;
   insuranceVerified?: boolean;
   backgroundCheckDate?: number;
+  
+  // Service address and radius for bid filtering
+  serviceAddress?: string;
+  serviceCoordinates?: Coordinates;
+  serviceRadiusMiles?: number;
+  serviceRadiusKm?: number;
 }
 
 export interface UserStats {

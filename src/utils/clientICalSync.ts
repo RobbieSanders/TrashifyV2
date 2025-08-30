@@ -150,6 +150,28 @@ export async function createCleaningJobsFromICalEvents(
   const now = new Date();
   now.setHours(23, 59, 59, 999);
   
+  // Get primary cleaner assigned to this property
+  let primaryCleaner: any = null;
+  try {
+    const teamMembersRef = collection(db, 'users', property.user_id, 'teamMembers');
+    const teamSnapshot = await getDocs(teamMembersRef);
+    
+    // Find primary cleaner assigned to this property
+    for (const memberDoc of teamSnapshot.docs) {
+      const member = memberDoc.data();
+      if (member.role === 'primary_cleaner' && 
+          member.status === 'active' && 
+          member.assignedProperties && 
+          member.assignedProperties.includes(property.id)) {
+        primaryCleaner = { id: memberDoc.id, ...member };
+        console.log(`Found primary cleaner ${primaryCleaner.name} assigned to property ${property.address}`);
+        break;
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching team members for auto-assignment:', error);
+  }
+  
   // Filter for future checkouts with actual reservations
   const futureCheckouts = events.filter(event => {
     const checkoutDate = new Date(event.endDate);
@@ -174,7 +196,7 @@ export async function createCleaningJobsFromICalEvents(
       cleaningJobsRef,
       where('address', '==', property.address),
       where('preferredDate', '==', cleaningDate.getTime()),
-      where('status', 'in', ['open', 'bidding', 'accepted', 'scheduled'])
+      where('status', 'in', ['open', 'bidding', 'accepted', 'scheduled', 'assigned'])
     );
     
     const existingJobs = await getDocs(existingJobQuery);
@@ -183,14 +205,14 @@ export async function createCleaningJobsFromICalEvents(
       const nightsStayed = Math.ceil((event.endDate.getTime() - event.startDate.getTime()) / (1000 * 60 * 60 * 24));
       
       const cleaningJobId = generateCleaningJobId();
-      const cleaningJob = {
+      const cleaningJob: any = {
         id: cleaningJobId,
         address: property.address,
         destination: {
           latitude: property.latitude || 0,
           longitude: property.longitude || 0
         },
-        status: 'scheduled',
+        status: primaryCleaner ? 'assigned' : 'scheduled', // Auto-assign if primary cleaner exists
         createdAt: Date.now(),
         hostId: property.user_id,
         hostFirstName: property.userName?.split(' ')[0] || '',
@@ -221,10 +243,18 @@ export async function createCleaningJobsFromICalEvents(
         icalEventId: event.uid
       };
       
+      // Auto-assign to primary cleaner if available
+      if (primaryCleaner && primaryCleaner.userId) {
+        cleaningJob.assignedCleanerId = primaryCleaner.userId; // Use actual user ID, not team member ID
+        cleaningJob.assignedCleanerName = primaryCleaner.name;
+        cleaningJob.assignedAt = new Date().toISOString();
+        console.log(`Auto-assigned cleaning job to user ${primaryCleaner.userId} (${primaryCleaner.name})`);
+      }
+      
       await setDoc(doc(cleaningJobsRef, cleaningJobId), cleaningJob);
       jobsCreated++;
       
-      console.log(`Created cleaning job for ${cleaningDate.toLocaleDateString()}`);
+      console.log(`Created cleaning job for ${cleaningDate.toLocaleDateString()}${primaryCleaner ? ` (assigned to ${primaryCleaner.name})` : ''}`);
     }
   }
   

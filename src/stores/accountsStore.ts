@@ -23,6 +23,11 @@ interface Property {
   is_main: number;
   created_at: number | null;
   icalUrl?: string | null;
+  bedrooms?: number | null;
+  beds?: number | null;
+  bathrooms?: number | null;
+  unitSize?: number | null;
+  unitSizeUnknown?: boolean;
 }
 
 interface WorkerHistory {
@@ -48,7 +53,12 @@ interface AccountsState {
     coords: { latitude: number; longitude: number },
     label?: string,
     makeMain?: boolean,
-    icalUrl?: string
+    icalUrl?: string,
+    bedrooms?: number,
+    beds?: number,
+    bathrooms?: number,
+    unitSize?: number,
+    unitSizeUnknown?: boolean
   ) => Promise<string>;
   updateProperty: (
     userId: string,
@@ -58,6 +68,11 @@ interface AccountsState {
       coords?: { latitude: number; longitude: number };
       label?: string;
       icalUrl?: string | null;
+      bedrooms?: number | null;
+      beds?: number | null;
+      bathrooms?: number | null;
+      unitSize?: number | null;
+      unitSizeUnknown?: boolean;
     }
   ) => Promise<void>;
   removeProperty: (userId: string, propertyId: string) => Promise<void>;
@@ -110,7 +125,12 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     coords: { latitude: number; longitude: number },
     label?: string,
     makeMain?: boolean,
-    icalUrl?: string
+    icalUrl?: string,
+    bedrooms?: number,
+    beds?: number,
+    bathrooms?: number,
+    unitSize?: number,
+    unitSizeUnknown?: boolean
   ) => {
     if (!isFirebaseConfigured || !db) {
       throw new Error('Firebase not configured');
@@ -133,6 +153,13 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     } else {
       propertyData.icalUrl = null;
     }
+
+    // Add property details if provided
+    if (bedrooms !== undefined) propertyData.bedrooms = bedrooms;
+    if (beds !== undefined) propertyData.beds = beds;
+    if (bathrooms !== undefined) propertyData.bathrooms = bathrooms;
+    if (unitSize !== undefined) propertyData.unitSize = unitSize;
+    if (unitSizeUnknown !== undefined) propertyData.unitSizeUnknown = unitSizeUnknown;
 
     try {
       // If making this the main property, update others first
@@ -166,6 +193,11 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
       coords?: { latitude: number; longitude: number };
       label?: string;
       icalUrl?: string | null;
+      bedrooms?: number | null;
+      beds?: number | null;
+      bathrooms?: number | null;
+      unitSize?: number | null;
+      unitSizeUnknown?: boolean;
     }
   ) => {
     if (!isFirebaseConfigured || !db) {
@@ -199,6 +231,13 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
         updateData.latitude = updates.coords.latitude;
         updateData.longitude = updates.coords.longitude;
       }
+
+      // Handle property details
+      if (updates.bedrooms !== undefined) updateData.bedrooms = updates.bedrooms;
+      if (updates.beds !== undefined) updateData.beds = updates.beds;
+      if (updates.bathrooms !== undefined) updateData.bathrooms = updates.bathrooms;
+      if (updates.unitSize !== undefined) updateData.unitSize = updates.unitSize;
+      if (updates.unitSizeUnknown !== undefined) updateData.unitSizeUnknown = updates.unitSizeUnknown;
 
       await updateDoc(doc(db, 'properties', propertyId), updateData);
       

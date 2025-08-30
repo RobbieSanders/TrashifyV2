@@ -51,6 +51,14 @@ function HeaderIcons({ navigation }: any) {
   const { items } = useNotifications();
   const unreadCount = items.filter(i => i.userId === user?.uid && !i.read).length;
 
+  // Determine which profile screen to navigate to based on user role
+  const getProfileRoute = () => {
+    if (user?.role === 'cleaner') {
+      return 'CleanerProfile';
+    }
+    return 'HostProfile';
+  };
+
   return (
     <View style={{ flexDirection: 'row', marginRight: 16 }}>
       <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={{ marginRight: 16 }}>
@@ -75,22 +83,12 @@ function HeaderIcons({ navigation }: any) {
           )}
         </View>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate('HostProfile')}>
+      <TouchableOpacity onPress={() => navigation.navigate(getProfileRoute())}>
         <Ionicons name="person-circle-outline" size={24} color="#0F172A" />
       </TouchableOpacity>
     </View>
   );
 }
-
-const TAMPA_MARKER = {
-  id: 'tampa',
-  title: 'Tampa, FL',
-  description: 'The home of the project',
-  coordinate: {
-    latitude: 27.9506,
-    longitude: -82.4572,
-  },
-};
 
 export default function App() {
   const user = useAuthStore(s => s.user);
@@ -165,6 +163,7 @@ import AssignCleanerScreen from './src/screens/cleaner/AssignCleanerScreen';
 import { ProfileSettingsScreen } from './src/screens/ProfileSettingsScreen';
 import { CleeviLogo } from './components/CleeviLogo';
 import HostProfileScreen from './src/screens/HostProfileScreenModern';
+import CleanerHostProfileScreenModern from './src/screens/CleanerHostProfileScreenModern';
 
 // Admin navigation stack
 function AdminStack() {
@@ -222,7 +221,7 @@ function AdminTabs() {
           let icon = 'help';
           if (route.name === 'Home') icon = 'home';
           else if (route.name === 'Cleaning') icon = 'calendar';
-          else if (route.name === 'Handyman Services') icon = 'hammer';
+          else if (route.name === 'Handyman') icon = 'hammer';
           else if (route.name === 'Trash Services') icon = 'trash';
           else if (route.name === 'My Teams') icon = 'people';
           else if (route.name === 'Properties') icon = 'business';
@@ -233,9 +232,8 @@ function AdminTabs() {
     >
       <Tab.Screen name="Home" component={HostStack} />
       <Tab.Screen name="Cleaning" component={CleaningStack} />
-      <Tab.Screen name="Handyman Services" component={HandymanServicesStack} />
+      <Tab.Screen name="Handyman" component={HandymanServicesStack} />
       <Tab.Screen name="Trash Services" component={TrashServicesStack} />
-      <Tab.Screen name="My Teams" component={MyTeamsStack} />
       <Tab.Screen name="More" component={MoreStack} />
     </Tab.Navigator>
   );
@@ -304,9 +302,8 @@ function HostTabs() {
     >
       <Tab.Screen name="Home" component={HostOnlyStack} />
       <Tab.Screen name="Cleaning" component={CleaningStack} />
-      <Tab.Screen name="Handyman Services" component={HandymanServicesStack} />
+      <Tab.Screen name="Handyman" component={HandymanServicesStack} />
       <Tab.Screen name="Trash Services" component={TrashServicesStack} />
-      <Tab.Screen name="My Teams" component={MyTeamsStack} />
       <Tab.Screen name="More" component={MoreStack} />
     </Tab.Navigator>
   );
@@ -2350,6 +2347,14 @@ function CleanerJobsStack() {
         })}
       />
       <Stack.Screen 
+        name="CleanerProfile" 
+        component={CleanerHostProfileScreenModern} 
+        options={({ navigation }: any) => ({ 
+          title: 'Profile',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
         name="HostProfile" 
         component={HostProfileScreen} 
         options={({ navigation }: any) => ({ 
@@ -2381,6 +2386,14 @@ function CleanerActiveStack() {
         })}
       />
       <Stack.Screen 
+        name="CleanerProfile" 
+        component={CleanerHostProfileScreenModern} 
+        options={({ navigation }: any) => ({ 
+          title: 'Profile',
+          headerRight: () => <HeaderIcons navigation={navigation} />
+        })}
+      />
+      <Stack.Screen 
         name="HostProfile" 
         component={HostProfileScreen} 
         options={({ navigation }: any) => ({ 
@@ -2397,7 +2410,7 @@ function CleanerProfileStack() {
     <Stack.Navigator>
       <Stack.Screen 
         name="CleanerProfile" 
-        component={HostProfileScreen} 
+        component={CleanerHostProfileScreenModern} 
         options={({ navigation }: any) => ({ 
           title: 'Profile',
           headerRight: () => <HeaderIcons navigation={navigation} />

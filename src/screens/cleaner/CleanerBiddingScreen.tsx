@@ -16,6 +16,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../utils/firebase';
 import {
   subscribeToOpenRecruitments,
+  subscribeToFilteredRecruitments,
   submitBid,
   getCleanerBidHistory,
   withdrawBid
@@ -58,14 +59,17 @@ export function CleanerBiddingScreen({ navigation }: any) {
     'Pet-Friendly'
   ];
 
-  // Subscribe to open recruitment posts
+  // Subscribe to filtered recruitment posts based on cleaner's service address
+  // Re-subscribe when the user's cleaner profile changes (especially service radius)
   useEffect(() => {
-    const unsubscribe = subscribeToOpenRecruitments((recruitments) => {
+    if (!user?.uid) return;
+    
+    const unsubscribe = subscribeToFilteredRecruitments(user.uid, (recruitments) => {
       setOpenRecruitments(recruitments);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user?.uid, (user?.cleanerProfile as any)?.serviceRadiusMiles, (user?.cleanerProfile as any)?.serviceCoordinates]);
 
   // Load cleaner's bid history
   useEffect(() => {
@@ -276,7 +280,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
                   <Text style={styles.recruitmentTitle}>{recruitment.title || `Join ${recruitment.hostName}'s Team`}</Text>
                   <Text style={styles.hostName}>Posted by {recruitment.hostName}</Text>
                   
-                  {/* Properties Section */}
+                  {/* Properties Section - Hide addresses until cleaner joins team */}
                   {recruitment.properties && recruitment.properties.length > 0 && (
                     <View style={styles.propertiesSection}>
                       <Text style={styles.propertiesLabel}>Properties to Clean:</Text>
@@ -284,10 +288,12 @@ export function CleanerBiddingScreen({ navigation }: any) {
                         <View key={index} style={styles.propertyCard}>
                           <Ionicons name="home-outline" size={14} color="#64748B" />
                           <View style={styles.propertyInfo}>
-                            {property.label && (
-                              <Text style={styles.propertyLabel}>{property.label}</Text>
-                            )}
-                            <Text style={styles.propertyAddress}>{property.address}</Text>
+                            <Text style={styles.propertyLabel}>
+                              Property {index + 1} {property.label ? `(${property.label})` : ''}
+                            </Text>
+                            <Text style={styles.propertyAddress}>
+                              {property.city && property.state ? `${property.city}, ${property.state}` : 'Address will be revealed after joining team'}
+                            </Text>
                             <View style={styles.propertyDetails}>
                               <Text style={styles.propertyDetail}>
                                 {property.bedrooms} bed • {property.bathrooms} bath
@@ -303,6 +309,45 @@ export function CleanerBiddingScreen({ navigation }: any) {
                       ))}
                     </View>
                   )}
+                  
+                  {/* Job Details Section */}
+                  <View style={styles.jobDetailsSection}>
+                    {recruitment.estimatedTurnoversPerMonth && (
+                      <View style={styles.detailItem}>
+                        <Ionicons name="calendar-outline" size={14} color="#64748B" />
+                        <Text style={styles.detailText}>
+                          {recruitment.estimatedTurnoversPerMonth === 11 ? '11+' : recruitment.estimatedTurnoversPerMonth} turnovers/month
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {recruitment.estimatedCleaningTimeHours && (
+                      <View style={styles.detailItem}>
+                        <Ionicons name="time-outline" size={14} color="#64748B" />
+                        <Text style={styles.detailText}>
+                          {recruitment.estimatedCleaningTimeHours === 11 ? '11h+' : `${recruitment.estimatedCleaningTimeHours}h`} per clean
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {(recruitment.cleanerWillProvideSupplies || recruitment.cleanerWillWashLinens) && (
+                      <View style={styles.responsibilitiesContainer}>
+                        <Text style={styles.responsibilitiesLabel}>You will:</Text>
+                        {recruitment.cleanerWillProvideSupplies && (
+                          <View style={styles.responsibilityItem}>
+                            <Ionicons name="checkmark-circle" size={12} color="#10B981" />
+                            <Text style={styles.responsibilityText}>Provide cleaning supplies</Text>
+                          </View>
+                        )}
+                        {recruitment.cleanerWillWashLinens && (
+                          <View style={styles.responsibilityItem}>
+                            <Ionicons name="checkmark-circle" size={12} color="#10B981" />
+                            <Text style={styles.responsibilityText}>Wash and dry linens + towels</Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
                   
                   {recruitment.notes && (
                     <Text style={styles.recruitmentDescription} numberOfLines={3}>
@@ -945,5 +990,44 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#EF4444',
     fontWeight: '600',
+  },
+  jobDetailsSection: {
+    backgroundColor: '#F8F9FA',
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 8,
+  },
+  detailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  detailText: {
+    fontSize: 12,
+    color: '#475569',
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  responsibilitiesContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  responsibilitiesLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 4,
+  },
+  responsibilityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 3,
+  },
+  responsibilityText: {
+    fontSize: 11,
+    color: '#475569',
+    marginLeft: 4,
   },
 });

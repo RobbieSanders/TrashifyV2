@@ -12,6 +12,7 @@ import {
   Platform,
   Switch
 } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useAccountsStore } from '../../stores/accountsStore';
@@ -24,10 +25,11 @@ import {
   closeRecruitmentPost
 } from '../../services/cleanerRecruitmentService';
 import { CleanerRecruitment, CleanerBid } from '../../utils/types';
+import { geocodeAddressCrossPlatform } from '../../services/geocodingService';
 
 export function SearchCleanersScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
-  const { properties, loadProperties } = useAccountsStore();
+  const { properties, loadProperties, addNewProperty } = useAccountsStore();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [myRecruitments, setMyRecruitments] = useState<CleanerRecruitment[]>([]);
   const [selectedRecruitment, setSelectedRecruitment] = useState<CleanerRecruitment | null>(null);
@@ -55,17 +57,15 @@ export function SearchCleanersScreen({ navigation }: any) {
   // Recruitment details
   const [servicesNeeded, setServicesNeeded] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
+  const [estimatedTurnoversPerMonth, setEstimatedTurnoversPerMonth] = useState<number>(1);
+  const [estimatedCleaningTimeHours, setEstimatedCleaningTimeHours] = useState<number>(1);
+  const [cleanerWillProvideSupplies, setCleanerWillProvideSupplies] = useState(false);
+  const [cleanerWillWashLinens, setCleanerWillWashLinens] = useState(false);
 
   // Service options
   const serviceOptions = [
     'Standard Cleaning',
-    'Deep Cleaning',
-    'Emergency Cleaning',
-    'Checkout Cleaning',
-    'Laundry Service',
-    'Window Cleaning',
-    'Carpet Cleaning',
-    'Disinfection Service'
+    'Checkout Cleaning'
   ];
 
   // Load properties on mount
@@ -97,39 +97,91 @@ export function SearchCleanersScreen({ navigation }: any) {
     return () => unsubscribe();
   }, [selectedRecruitment?.id]);
 
-  const handleAddProperty = () => {
+  const handleAddProperty = async () => {
     if (!propertyAddress) {
       Alert.alert('Missing Information', 'Please enter property address');
       return;
     }
+
+    if (!propertyCity || !propertyState || !propertyZipCode) {
+      Alert.alert('Missing Information', 'Please enter city, state, and zip code');
+      return;
+    }
+
+    if (!user?.uid) {
+      Alert.alert('Error', 'User not authenticated');
+      return;
+    }
     
-    const newProperty = {
-      address: propertyAddress.trim(),
-      city: propertyCity.trim() || undefined,
-      state: propertyState.trim() || undefined,
-      zipCode: propertyZipCode.trim() || undefined,
-      bedrooms: bedrooms ? parseInt(bedrooms) : undefined,
-      beds: beds ? parseInt(beds) : undefined,
-      bathrooms: bathrooms ? parseFloat(bathrooms) : undefined,
-      unitSize: unitSize && !unitSizeUnknown ? parseInt(unitSize) : undefined,
-      unitSizeUnknown,
-      label: propertyLabel.trim() || propertyAddress.trim()
-    };
+    setLoading(true);
     
-    setSelectedProperties([...selectedProperties, newProperty]);
-    
-    // Clear form
-    setPropertyAddress('');
-    setPropertyCity('');
-    setPropertyState('');
-    setPropertyZipCode('');
-    setBedrooms('');
-    setBeds('');
-    setBathrooms('');
-    setUnitSize('');
-    setUnitSizeUnknown(false);
-    setPropertyLabel('');
-    setUseExistingProperty(true);
+    try {
+      // Build full address for geocoding
+      const fullAddress = `${propertyAddress.trim()}, ${propertyCity.trim()}, ${propertyState.trim()} ${propertyZipCode.trim()}`;
+      
+      // Geocode the address to get coordinates
+      const geocoded = await geocodeAddressCrossPlatform(fullAddress);
+      
+      if (!geocoded || !geocoded.coordinates) {
+        Alert.alert('Invalid Address', 'Unable to find coordinates for this address. Please verify the address is correct.');
+        setLoading(false);
+        return;
+      }
+      
+      // Save property to user's properties list
+      const propertyId = await addNewProperty(
+        user.uid,
+        geocoded.fullAddress,
+        geocoded.coordinates,
+        propertyLabel.trim() || propertyAddress.trim(),
+        properties.length === 0, // Make it main if it's the first property
+        undefined, // No iCal URL
+        bedrooms ? parseInt(bedrooms) : undefined,
+        beds ? parseInt(beds) : undefined,
+        bathrooms ? parseFloat(bathrooms) : undefined,
+        unitSize && !unitSizeUnknown ? parseInt(unitSize) : undefined,
+        unitSizeUnknown
+      );
+      
+      // Add to selected properties for this recruitment post
+      const newProperty = {
+        id: propertyId,
+        address: geocoded.fullAddress,
+        city: propertyCity.trim(),
+        state: propertyState.trim(),
+        zipCode: propertyZipCode.trim(),
+        bedrooms: bedrooms ? parseInt(bedrooms) : undefined,
+        beds: beds ? parseInt(beds) : undefined,
+        bathrooms: bathrooms ? parseFloat(bathrooms) : undefined,
+        unitSize: unitSize && !unitSizeUnknown ? parseInt(unitSize) : undefined,
+        unitSizeUnknown,
+        label: propertyLabel.trim() || propertyAddress.trim(),
+        coordinates: geocoded.coordinates // Include the geocoded coordinates
+      };
+      
+      setSelectedProperties([...selectedProperties, newProperty]);
+      
+      Alert.alert('Success', 'Property added to your account and selected for recruitment');
+      
+      // Clear form
+      setPropertyAddress('');
+      setPropertyCity('');
+      setPropertyState('');
+      setPropertyZipCode('');
+      setBedrooms('');
+      setBeds('');
+      setBathrooms('');
+      setUnitSize('');
+      setUnitSizeUnknown(false);
+      setPropertyLabel('');
+      setUseExistingProperty(true);
+      
+    } catch (error) {
+      console.error('Error adding property:', error);
+      Alert.alert('Error', 'Failed to add property. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreateRecruitment = async () => {
@@ -142,7 +194,19 @@ export function SearchCleanersScreen({ navigation }: any) {
         propertiesToPost.push({
           id: property.id,
           address: property.address,
-          label: property.label || property.address
+          label: property.label || property.address,
+          coordinates: property.latitude && property.longitude ? {
+            latitude: property.latitude,
+            longitude: property.longitude
+          } : undefined,
+          city: property.address ? property.address.split(',')[1]?.trim() : undefined,
+          state: property.address ? property.address.split(',')[2]?.trim().split(' ')[0] : undefined,
+          zipCode: property.address ? property.address.split(',')[2]?.trim().split(' ')[1] : undefined,
+          bedrooms: property.bedrooms,
+          beds: property.beds,
+          bathrooms: property.bathrooms,
+          unitSize: property.unitSize,
+          unitSizeUnknown: property.unitSizeUnknown
         });
       }
     }
@@ -162,13 +226,23 @@ export function SearchCleanersScreen({ navigation }: any) {
 
     setLoading(true);
     try {
-      const postData = {
+      const postData: any = {
         properties: propertiesToPost,
         servicesNeeded,
-        notes: notes.trim() || undefined,
         title: `Cleaner needed for ${propertiesToPost.length} ${propertiesToPost.length === 1 ? 'property' : 'properties'}`,
-        hostEmail: user?.email || undefined
+        estimatedTurnoversPerMonth,
+        estimatedCleaningTimeHours,
+        cleanerWillProvideSupplies,
+        cleanerWillWashLinens
       };
+
+      // Only add optional fields if they have values
+      if (notes.trim()) {
+        postData.notes = notes.trim();
+      }
+      if (user?.email) {
+        postData.hostEmail = user.email;
+      }
 
       await createRecruitmentPost(
         user!.uid,
@@ -593,6 +667,106 @@ export function SearchCleanersScreen({ navigation }: any) {
                     </Text>
                   </TouchableOpacity>
                 ))}
+              </View>
+
+              {/* Estimated Turnovers Per Month */}
+              <Text style={styles.label}>Estimated Turnovers a Month?</Text>
+              <View style={styles.optionsContainer}>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
+                  <TouchableOpacity
+                    key={num}
+                    style={[
+                      styles.optionChip,
+                      estimatedTurnoversPerMonth === num && styles.optionChipSelected
+                    ]}
+                    onPress={() => setEstimatedTurnoversPerMonth(num)}
+                  >
+                    <Text style={[
+                      styles.optionChipText,
+                      estimatedTurnoversPerMonth === num && styles.optionChipTextSelected
+                    ]}>
+                      {num}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[
+                    styles.optionChip,
+                    estimatedTurnoversPerMonth === 11 && styles.optionChipSelected
+                  ]}
+                  onPress={() => setEstimatedTurnoversPerMonth(11)}
+                >
+                  <Text style={[
+                    styles.optionChipText,
+                    estimatedTurnoversPerMonth === 11 && styles.optionChipTextSelected
+                  ]}>
+                    11+
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Estimated Cleaning Time */}
+              <Text style={styles.label}>Estimated Time to Clean Your Unit?</Text>
+              <View style={styles.optionsContainer}>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(num => (
+                  <TouchableOpacity
+                    key={num}
+                    style={[
+                      styles.optionChip,
+                      estimatedCleaningTimeHours === num && styles.optionChipSelected
+                    ]}
+                    onPress={() => setEstimatedCleaningTimeHours(num)}
+                  >
+                    <Text style={[
+                      styles.optionChipText,
+                      estimatedCleaningTimeHours === num && styles.optionChipTextSelected
+                    ]}>
+                      {num}h
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[
+                    styles.optionChip,
+                    estimatedCleaningTimeHours === 11 && styles.optionChipSelected
+                  ]}
+                  onPress={() => setEstimatedCleaningTimeHours(11)}
+                >
+                  <Text style={[
+                    styles.optionChipText,
+                    estimatedCleaningTimeHours === 11 && styles.optionChipTextSelected
+                  ]}>
+                    11h+
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Cleaner Responsibilities */}
+              <Text style={styles.label}>The Cleaner Will</Text>
+              <View style={styles.checkboxContainer}>
+                <TouchableOpacity
+                  style={styles.checkboxItem}
+                  onPress={() => setCleanerWillProvideSupplies(!cleanerWillProvideSupplies)}
+                >
+                  <View style={[styles.checkbox, cleanerWillProvideSupplies && styles.checkboxChecked]}>
+                    {cleanerWillProvideSupplies && (
+                      <Ionicons name="checkmark" size={16} color="white" />
+                    )}
+                  </View>
+                  <Text style={styles.checkboxText}>Provide cleaning supplies</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.checkboxItem}
+                  onPress={() => setCleanerWillWashLinens(!cleanerWillWashLinens)}
+                >
+                  <View style={[styles.checkbox, cleanerWillWashLinens && styles.checkboxChecked]}>
+                    {cleanerWillWashLinens && (
+                      <Ionicons name="checkmark" size={16} color="white" />
+                    )}
+                  </View>
+                  <Text style={styles.checkboxText}>Wash and dry linens + towels</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Notes */}
@@ -1201,5 +1375,74 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontSize: 12,
     fontWeight: '600',
+  },
+  optionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+  },
+  optionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: 'white',
+    marginRight: 8,
+    marginBottom: 8,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  optionChipSelected: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#1E88E5',
+  },
+  optionChipText: {
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  optionChipTextSelected: {
+    color: '#1E88E5',
+    fontWeight: '600',
+  },
+  checkboxContainer: {
+    marginBottom: 8,
+  },
+  checkboxItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    backgroundColor: 'white',
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  checkboxText: {
+    fontSize: 14,
+    color: '#334155',
+    flex: 1,
+  },
+  pickerContainer: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 8,
+  },
+  picker: {
+    height: 50,
+    color: '#0F172A',
   },
 });

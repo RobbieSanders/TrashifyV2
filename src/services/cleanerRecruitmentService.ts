@@ -16,12 +16,50 @@ import {
   arrayRemove
 } from 'firebase/firestore';
 import { db } from '../utils/firebase';
-import { CleanerRecruitment, CleanerBid } from '../utils/types';
+import { CleanerRecruitment, CleanerBid, Coordinates } from '../utils/types';
 import { useNotifications } from '../stores/notificationsStore';
+import { geocodeAddressCrossPlatform } from './geocodingService';
+import { isPropertyWithinRadiusGoogle } from './googleGeocodingService';
 
 // Generate unique ID for recruitment posts and bids
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Calculate distance between two coordinates in miles
+function calculateDistance(coord1: Coordinates, coord2: Coordinates): number {
+  const R = 3959; // Earth's radius in miles
+  const dLat = (coord2.latitude - coord1.latitude) * Math.PI / 180;
+  const dLon = (coord2.longitude - coord1.longitude) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(coord1.latitude * Math.PI / 180) * Math.cos(coord2.latitude * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+// Check if a property is within a cleaner's service radius
+async function isPropertyWithinRadius(
+  propertyAddress: string,
+  cleanerCoordinates: Coordinates,
+  radiusMiles: number
+): Promise<boolean> {
+  try {
+    const propertyGeocode = await geocodeAddressCrossPlatform(propertyAddress);
+    if (!propertyGeocode) {
+      console.warn('[Recruitment] Could not geocode property address:', propertyAddress);
+      return false; // If we can't geocode, don't show the bid
+    }
+    
+    const distance = calculateDistance(cleanerCoordinates, propertyGeocode.coordinates);
+    console.log(`[Recruitment] Distance from cleaner to property: ${distance.toFixed(2)} miles`);
+    
+    return distance <= radiusMiles;
+  } catch (error) {
+    console.error('[Recruitment] Error checking property distance:', error);
+    return false;
+  }
 }
 
 // Create a new cleaner recruitment post
@@ -92,6 +130,169 @@ export function subscribeToOpenRecruitments(callback: (recruitments: CleanerRecr
     callback(recruitments);
   }, (error) => {
     console.error('[Recruitment] Error subscribing to open posts:', error);
+  });
+}
+
+// Subscribe to filtered recruitment posts based on cleaner's service address and radius
+export function subscribeToFilteredRecruitments(
+  cleanerId: string,
+  callback: (recruitments: CleanerRecruitment[]) => void
+) {
+  console.log('[Recruitment] subscribeToFilteredRecruitments called for cleaner:', cleanerId);
+  
+  const q = query(
+    collection(db, 'cleanerRecruitments'),
+    where('status', '==', 'open')
+  );
+
+  return onSnapshot(q, async (snapshot) => {
+    console.log('[Recruitment] onSnapshot triggered with', snapshot.docs.length, 'recruitments');
+    
+    try {
+      // Get cleaner's service address and radius
+      const cleanerDoc = await getDoc(doc(db, 'users', cleanerId));
+      if (!cleanerDoc.exists()) {
+        console.warn('[Recruitment] Cleaner not found:', cleanerId);
+        callback([]);
+        return;
+      }
+      
+      const cleanerData = cleanerDoc.data();
+      const cleanerProfile = cleanerData.cleanerProfile;
+      
+      console.log('[Recruitment] Cleaner profile:', {
+        hasProfile: !!cleanerProfile,
+        hasCoordinates: !!cleanerProfile?.serviceCoordinates,
+        hasRadius: !!cleanerProfile?.serviceRadiusMiles,
+        serviceAddress: cleanerProfile?.serviceAddress,
+        coordinates: cleanerProfile?.serviceCoordinates,
+        radius: cleanerProfile?.serviceRadiusMiles,
+        fullProfile: cleanerProfile
+      });
+      
+      // If cleaner hasn't set up service address, show NO recruitments (force them to set it up)
+      if (!cleanerProfile?.serviceCoordinates || !cleanerProfile?.serviceRadiusMiles) {
+        console.log('[Recruitment] Cleaner has no service address set, showing NO recruitments to force setup');
+        callback([]);
+        return;
+      }
+      
+      const cleanerCoordinates = cleanerProfile.serviceCoordinates;
+      const radiusMiles = cleanerProfile.serviceRadiusMiles;
+      
+      // Validate coordinates format
+      if (!cleanerCoordinates.latitude || !cleanerCoordinates.longitude || 
+          typeof cleanerCoordinates.latitude !== 'number' || 
+          typeof cleanerCoordinates.longitude !== 'number') {
+        console.error('[Recruitment] Invalid cleaner coordinates format:', cleanerCoordinates);
+        callback([]);
+        return;
+      }
+      
+      console.log(`[Recruitment] Filtering recruitments for cleaner at ${cleanerCoordinates.latitude}, ${cleanerCoordinates.longitude} within ${radiusMiles} miles`);
+      
+      const filteredRecruitments: CleanerRecruitment[] = [];
+      
+      // Process each recruitment post
+      for (const docSnapshot of snapshot.docs) {
+        const recruitment = { id: docSnapshot.id, ...docSnapshot.data() } as CleanerRecruitment;
+        
+        console.log(`[Recruitment] Checking recruitment ${recruitment.id} with ${recruitment.properties?.length || 0} properties`);
+        
+        // Check if any property in this recruitment is within the cleaner's radius
+        let isWithinRadius = false;
+        
+        if (recruitment.properties && recruitment.properties.length > 0) {
+          for (const property of recruitment.properties) {
+            console.log(`[Recruitment] Checking property: ${property.address}`);
+            
+            // Skip if property doesn't have a valid address
+            if (!property.address || property.address.trim() === '') {
+              console.warn('[Recruitment] Property has no address, skipping:', property);
+              continue;
+            }
+            
+            let withinRadius = false;
+            
+            // Check if property already has coordinates (from database)
+            if (property.coordinates && 
+                typeof property.coordinates.latitude === 'number' && 
+                typeof property.coordinates.longitude === 'number' &&
+                !isNaN(property.coordinates.latitude) && 
+                !isNaN(property.coordinates.longitude)) {
+              
+              console.log(`[Recruitment] Using existing coordinates for ${property.address}: ${property.coordinates.latitude}, ${property.coordinates.longitude}`);
+              
+              // Calculate distance directly using existing coordinates
+              const distance = calculateDistance(cleanerCoordinates, property.coordinates);
+              withinRadius = distance <= radiusMiles;
+              console.log(`[Recruitment] Direct distance calculation: ${distance.toFixed(2)} miles, within ${radiusMiles} mile radius: ${withinRadius}`);
+              
+            } else {
+              console.log(`[Recruitment] No coordinates available for ${property.address}, geocoding...`);
+              
+              // Use Google Maps API for more accurate distance calculation
+              try {
+                withinRadius = await isPropertyWithinRadiusGoogle(
+                  property.address,
+                  cleanerCoordinates,
+                  radiusMiles
+                );
+                console.log(`[Recruitment] Google Maps result for ${property.address}: ${withinRadius ? 'WITHIN' : 'OUTSIDE'} ${radiusMiles} mile radius`);
+              } catch (error) {
+                console.error('[Recruitment] Google Maps API failed, using fallback calculation:', error);
+                // Fallback to basic distance calculation
+                try {
+                  const propertyGeocode = await geocodeAddressCrossPlatform(property.address);
+                  if (propertyGeocode && propertyGeocode.coordinates) {
+                    const distance = calculateDistance(cleanerCoordinates, propertyGeocode.coordinates);
+                    withinRadius = distance <= radiusMiles;
+                    console.log(`[Recruitment] Fallback distance calculation: ${distance.toFixed(2)} miles, within ${radiusMiles} mile radius: ${withinRadius}`);
+                  } else {
+                    console.warn('[Recruitment] Could not geocode property address with fallback:', property.address);
+                  }
+                } catch (fallbackError) {
+                  console.error('[Recruitment] Fallback geocoding also failed:', fallbackError);
+                }
+              }
+            }
+            
+            console.log(`[Recruitment] Property ${property.address} within radius: ${withinRadius}`);
+            
+            if (withinRadius) {
+              isWithinRadius = true;
+              break; // If any property is within radius, include this recruitment
+            }
+          }
+        }
+        
+        console.log(`[Recruitment] Recruitment ${recruitment.id} within radius: ${isWithinRadius}`);
+        
+        if (isWithinRadius) {
+          filteredRecruitments.push(recruitment);
+        }
+      }
+      
+      // Sort filtered results
+      filteredRecruitments.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      
+      console.log(`[Recruitment] Final result: Filtered ${filteredRecruitments.length} recruitments from ${snapshot.docs.length} total`);
+      console.log(`[Recruitment] Cleaner service area: ${cleanerCoordinates.latitude}, ${cleanerCoordinates.longitude} within ${radiusMiles} miles`);
+      
+      callback(filteredRecruitments);
+      
+    } catch (error) {
+      console.error('[Recruitment] Error filtering recruitments:', error);
+      // Fallback to showing all recruitments if filtering fails
+      const allRecruitments: CleanerRecruitment[] = [];
+      snapshot.forEach((doc) => {
+        allRecruitments.push({ id: doc.id, ...doc.data() } as CleanerRecruitment);
+      });
+      allRecruitments.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      callback(allRecruitments);
+    }
+  }, (error) => {
+    console.error('[Recruitment] Error subscribing to filtered posts:', error);
   });
 }
 
