@@ -123,16 +123,56 @@ const ManualCleanForm: React.FC<ManualCleanFormProps> = ({
       // Get coordinates for the address (simplified - using a default location)
       const coordinates = { latitude: 25.7617, longitude: -80.1918 }; // Miami default
 
+      // Parse the preferred time and combine with preferred date
+      const [time, period] = preferredTime.split(' ');
+      const [hours, minutes] = time.split(':').map(Number);
+      let adjustedHours = hours;
+      
+      if (period === 'PM' && hours !== 12) {
+        adjustedHours += 12;
+      } else if (period === 'AM' && hours === 12) {
+        adjustedHours = 0;
+      }
+      
+      const combinedDateTime = new Date(preferredDate);
+      combinedDateTime.setHours(adjustedHours, minutes, 0, 0);
+
       // Create the cleaning job - remove undefined values for Firebase
       const jobData: any = {
         address: address.trim(),
         destination: coordinates,
         hostId: user.uid,
         cleaningType,
-        preferredDate: preferredDate.getTime(),
+        preferredDate: combinedDateTime.getTime(),
         preferredTime,
-        status: (selectedCleaner ? 'assigned' : 'open') as 'assigned' | 'open'
+        status: cleaningType === 'emergency' ? 'bidding' : (selectedCleaner ? 'assigned' : 'open') as 'assigned' | 'open' | 'bidding'
       };
+
+      // Add emergency flag if this is an emergency clean
+      if (cleaningType === 'emergency') {
+        jobData.isEmergency = true;
+        jobData.urgencyLevel = 'same-day'; // Default urgency level
+        jobData.isOneTimeJob = true;
+        jobData.minimumNoticeHours = 3;
+      }
+
+      // Get property details from the selected address
+      const selectedProperty = properties.find(p => p.address === address.trim());
+      if (selectedProperty) {
+        // Add property details to the job
+        if (selectedProperty.bedrooms !== undefined && selectedProperty.bedrooms !== null) {
+          jobData.bedrooms = selectedProperty.bedrooms;
+        }
+        if (selectedProperty.bathrooms !== undefined && selectedProperty.bathrooms !== null) {
+          jobData.bathrooms = selectedProperty.bathrooms;
+        }
+        if (selectedProperty.beds !== undefined && selectedProperty.beds !== null) {
+          jobData.beds = selectedProperty.beds;
+        }
+        if (selectedProperty.unitSize !== undefined && selectedProperty.unitSize !== null) {
+          jobData.unitSize = selectedProperty.unitSize;
+        }
+      }
 
       // Only add optional fields if they have values
       if (user.firstName) {

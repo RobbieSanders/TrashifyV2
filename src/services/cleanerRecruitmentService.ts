@@ -729,6 +729,144 @@ export async function searchRecruitmentPosts(filters: {
   }
 }
 
+// Subscribe to filtered emergency cleaning jobs - EXACT SAME LOGIC as regular recruitments
+export function subscribeToFilteredEmergencyJobs(
+  cleanerId: string,
+  callback: (jobs: any[]) => void
+) {
+  console.log('[Emergency] subscribeToFilteredEmergencyJobs called for cleaner:', cleanerId);
+  
+  // Simplified query to avoid index requirement - we'll sort in memory
+  const q = query(
+    collection(db, 'cleaningJobs'),
+    where('isEmergency', '==', true),
+    where('status', 'in', ['open', 'bidding', 'pending']),
+    limit(50) // Limit for better performance
+  );
+
+  return onSnapshot(q, async (snapshot) => {
+    console.log('[Emergency] onSnapshot triggered with', snapshot.docs.length, 'emergency jobs');
+    
+    // DEBUG: Log all emergency jobs found
+    snapshot.docs.forEach((doc) => {
+      const jobData = doc.data();
+      console.log(`[Emergency] Found job ${doc.id}:`, {
+        address: jobData.address,
+        hasDestination: !!jobData.destination,
+        destination: jobData.destination,
+        isEmergency: jobData.isEmergency,
+        status: jobData.status,
+        urgencyLevel: jobData.urgencyLevel
+      });
+    });
+    
+    try {
+      // Get cleaner's service address and radius - EXACT SAME as regular recruitments
+      const cleanerDoc = await getDoc(doc(db, 'users', cleanerId));
+      if (!cleanerDoc.exists()) {
+        console.warn('[Emergency] Cleaner not found:', cleanerId);
+        callback([]);
+        return;
+      }
+      
+      const cleanerData = cleanerDoc.data();
+      const cleanerProfile = cleanerData.cleanerProfile;
+      
+      console.log('[Emergency] Cleaner profile:', {
+        hasProfile: !!cleanerProfile,
+        hasCoordinates: !!cleanerProfile?.serviceCoordinates,
+        hasRadius: !!cleanerProfile?.serviceRadiusMiles,
+        serviceAddress: cleanerProfile?.serviceAddress,
+        coordinates: cleanerProfile?.serviceCoordinates,
+        radius: cleanerProfile?.serviceRadiusMiles
+      });
+      
+      // If cleaner hasn't set up service address, show NO emergency jobs
+      if (!cleanerProfile?.serviceCoordinates || !cleanerProfile?.serviceRadiusMiles) {
+        console.log('[Emergency] Cleaner has no service address set, showing NO emergency jobs');
+        callback([]);
+        return;
+      }
+      
+      const cleanerCoordinates = cleanerProfile.serviceCoordinates;
+      const radiusMiles = cleanerProfile.serviceRadiusMiles;
+      
+      // Validate coordinates format
+      if (!cleanerCoordinates.latitude || !cleanerCoordinates.longitude || 
+          typeof cleanerCoordinates.latitude !== 'number' || 
+          typeof cleanerCoordinates.longitude !== 'number') {
+        console.error('[Emergency] Invalid cleaner coordinates format:', cleanerCoordinates);
+        callback([]);
+        return;
+      }
+      
+      console.log(`[Emergency] Filtering emergency jobs for cleaner at ${cleanerCoordinates.latitude}, ${cleanerCoordinates.longitude} within ${radiusMiles} miles`);
+      
+      // Process jobs in batches for better performance (EXACT SAME as regular recruitments)
+      const jobs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      console.log(`[Emergency] Raw jobs from database:`, jobs.map(j => ({
+        id: j.id,
+        address: j.address,
+        destination: j.destination,
+        isEmergency: j.isEmergency,
+        status: j.status
+      })));
+      
+      const batchSize = 10;
+      const filteredJobs: any[] = [];
+      
+      for (let i = 0; i < jobs.length; i += batchSize) {
+        const batch = jobs.slice(i, i + batchSize);
+        
+        const batchPromises = batch.map(async (job: any) => {
+          if (!job.address) {
+            console.log('[Emergency] Job missing address:', job.id);
+            return null;
+          }
+          
+          // Emergency jobs store coordinates in 'destination' field, not 'coordinates'
+          try {
+            const distance = await calculateDistanceWithCache(
+              cleanerCoordinates,
+              job.address,
+              job.destination // Emergency jobs use 'destination' for coordinates
+            );
+            
+            if (distance === null) {
+              console.log(`[Emergency] Could not calculate distance for job ${job.id} at ${job.address}`);
+              return null;
+            }
+            
+            console.log(`[Emergency] Job ${job.id}: Distance from cleaner to job: ${distance.toFixed(2)} miles (within ${radiusMiles} miles: ${distance <= radiusMiles})`);
+            return distance <= radiusMiles ? job : null;
+          } catch (error) {
+            console.error(`[Emergency] Error checking job ${job.id} distance:`, error);
+            return null;
+          }
+        });
+        
+        const batchResults = await Promise.all(batchPromises);
+        filteredJobs.push(...batchResults.filter(job => job !== null));
+      }
+      
+      console.log(`[Emergency] Final result: Filtered ${filteredJobs.length} emergency jobs from ${jobs.length} total`);
+      
+      callback(filteredJobs);
+      
+    } catch (error) {
+      console.error('[Emergency] Error filtering emergency jobs:', error);
+      // Fallback to showing limited jobs if filtering fails
+      const allJobs: any[] = [];
+      snapshot.docs.slice(0, 20).forEach((doc) => { // Limit fallback to 20 items
+        allJobs.push({ id: doc.id, ...doc.data() });
+      });
+      callback(allJobs);
+    }
+  }, (error) => {
+    console.error('[Emergency] Error subscribing to filtered emergency jobs:', error);
+  });
+}
+
 // Clear caches (useful for testing or memory management)
 export function clearCaches(): void {
   distanceCache.clear();

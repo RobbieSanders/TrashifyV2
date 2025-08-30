@@ -89,6 +89,10 @@ export default function HostProfileScreenModern({ navigation }: any) {
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [loading, setLoading] = useState(false);
   
+  // Emergency bids states
+  const [emergencyBids, setEmergencyBids] = useState<any[]>([]);
+  const [loadingEmergencyBids, setLoadingEmergencyBids] = useState(true);
+  
   // Job cleanup confirmation states
   const [showJobCleanupModal, setShowJobCleanupModal] = useState(false);
   const [jobCleanupType, setJobCleanupType] = useState<'remove_member' | 'unassign_properties'>('remove_member');
@@ -173,6 +177,52 @@ export default function HostProfileScreenModern({ navigation }: any) {
     }, (error) => {
       console.error('[HostProfileScreen] Error loading team:', error);
       setTeamMembers([]);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  // Subscribe to emergency bids for this host's jobs
+  useEffect(() => {
+    if (!db || !user?.uid) return;
+
+    const emergencyBidsRef = collection(db, 'emergencyBids');
+    const emergencyBidsQuery = query(
+      emergencyBidsRef,
+      where('status', '==', 'pending')
+    );
+    
+    const unsubscribe = onSnapshot(emergencyBidsQuery, async (snapshot) => {
+      const bids: any[] = [];
+      
+      // Get all pending emergency bids
+      for (const bidDoc of snapshot.docs) {
+        const bidData = { id: bidDoc.id, ...bidDoc.data() } as any;
+        
+        // Check if this bid is for one of this host's emergency jobs
+        if (bidData.cleaningJobId) {
+          try {
+            const jobDoc = await getDoc(doc(db, 'cleaningJobs', bidData.cleaningJobId));
+            if (jobDoc.exists()) {
+              const jobData = jobDoc.data();
+              if (jobData.hostId === user.uid && jobData.isEmergency) {
+                // Add job details to the bid
+                bidData.jobDetails = jobData;
+                bids.push(bidData);
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching job details for bid:', bidData.id, error);
+          }
+        }
+      }
+      
+      setEmergencyBids(bids);
+      setLoadingEmergencyBids(false);
+    }, (error) => {
+      console.error('[HostProfileScreen] Error loading emergency bids:', error);
+      setEmergencyBids([]);
+      setLoadingEmergencyBids(false);
     });
 
     return () => unsubscribe();
@@ -947,6 +997,107 @@ export default function HostProfileScreenModern({ navigation }: any) {
     }
   };
 
+  // Handle accepting an emergency bid
+  const handleAcceptEmergencyBid = async (bid: any) => {
+    if (!user?.uid || !bid.cleaningJobId || !bid.cleanerId) return;
+    
+    Alert.alert(
+      'Accept Emergency Bid',
+      `Accept ${bid.cleanerName}'s bid of $${bid.flatFee} for this emergency cleaning?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Accept',
+          style: 'default',
+          onPress: async () => {
+            setLoading(true);
+            try {
+              // 1. Update the emergency job to assign it to the cleaner
+              const jobRef = doc(db, 'cleaningJobs', bid.cleaningJobId);
+              await updateDoc(jobRef, {
+                assignedCleanerId: bid.cleanerId,
+                assignedCleanerName: bid.cleanerName,
+                status: 'assigned',
+                flatFee: bid.flatFee,
+                assignedAt: Date.now(),
+                updatedAt: Date.now()
+              });
+
+              // 2. Update the accepted bid status
+              const bidRef = doc(db, 'emergencyBids', bid.id);
+              await updateDoc(bidRef, {
+                status: 'accepted',
+                acceptedAt: Date.now()
+              });
+
+              // 3. Reject all other bids for the same job
+              const otherBidsQuery = query(
+                collection(db, 'emergencyBids'),
+                where('cleaningJobId', '==', bid.cleaningJobId),
+                where('status', '==', 'pending')
+              );
+              
+              const otherBidsSnapshot = await getDocs(otherBidsQuery);
+              for (const otherBidDoc of otherBidsSnapshot.docs) {
+                if (otherBidDoc.id !== bid.id) {
+                  await updateDoc(otherBidDoc.ref, {
+                    status: 'rejected',
+                    rejectedAt: Date.now()
+                  });
+                }
+              }
+
+              Alert.alert(
+                'Emergency Bid Accepted!',
+                `${bid.cleanerName} has been assigned to your emergency cleaning. They will be notified immediately and the job will appear on your calendar.`
+              );
+            } catch (error) {
+              console.error('Error accepting emergency bid:', error);
+              Alert.alert('Error', 'Failed to accept emergency bid. Please try again.');
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Handle rejecting an emergency bid
+  const handleRejectEmergencyBid = async (bid: any) => {
+    if (!user?.uid) return;
+    
+    Alert.alert(
+      'Reject Emergency Bid',
+      `Reject ${bid.cleanerName}'s bid of $${bid.flatFee}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: async () => {
+            setLoading(true);
+            try {
+              // Update the bid status to rejected
+              const bidRef = doc(db, 'emergencyBids', bid.id);
+              await updateDoc(bidRef, {
+                status: 'rejected',
+                rejectedAt: Date.now()
+              });
+
+              Alert.alert('Bid Rejected', `${bid.cleanerName}'s bid has been rejected.`);
+            } catch (error) {
+              console.error('Error rejecting emergency bid:', error);
+              Alert.alert('Error', 'Failed to reject emergency bid. Please try again.');
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -1517,6 +1668,162 @@ export default function HostProfileScreenModern({ navigation }: any) {
               ) : null}
             </View>
             
+            {/* Emergency Bids Section */}
+            {emergencyBids.length > 0 && (
+              <View style={styles.sectionCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="warning" size={20} color="#DC2626" style={{ marginRight: 8 }} />
+                    <Text style={[styles.sectionTitle, { marginBottom: 0, color: '#DC2626' }]}>🚨 Emergency Recruitment Bids</Text>
+                  </View>
+                  <View style={[styles.mainBadge, { backgroundColor: '#DC2626' }]}>
+                    <Text style={styles.mainBadgeText}>{emergencyBids.length} URGENT</Text>
+                  </View>
+                </View>
+                
+                {emergencyBids.map((bid) => {
+                  const job = bid.jobDetails;
+                  const urgencyColor = job?.urgencyLevel === 'immediate' ? '#DC2626' : 
+                                     job?.urgencyLevel === 'same-day' ? '#EA580C' : '#D97706';
+                  
+                  // Extract city from address for display
+                  const getLocationDisplay = (address: string) => {
+                    if (!address) return 'Location not specified';
+                    const parts = address.split(',');
+                    if (parts.length >= 2) {
+                      return parts[1].trim();
+                    }
+                    return 'General area';
+                  };
+                  
+                  return (
+                    <View key={bid.id} style={[styles.propertyCard, { 
+                      borderColor: urgencyColor, 
+                      borderWidth: 2,
+                      backgroundColor: '#FEF2F2',
+                      marginBottom: 16
+                    }]}>
+                      <View style={styles.propertyHeader}>
+                        <View style={styles.propertyInfo}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                            <View style={[styles.closeButton, { 
+                              backgroundColor: urgencyColor, 
+                              marginRight: 12,
+                              width: 32,
+                              height: 32
+                            }]}>
+                              <Ionicons name="flash" size={16} color="white" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={[styles.propertyLabel, { color: urgencyColor, fontSize: 14 }]}>
+                                EMERGENCY CLEANING BID
+                              </Text>
+                              <Text style={[styles.propertyAddress, { fontSize: 13 }]}>
+                                {getLocationDisplay(job?.address || '')}
+                              </Text>
+                            </View>
+                          </View>
+                          
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                            <Text style={[styles.propertyLabel, { fontSize: 18, color: '#10B981' }]}>
+                              ${bid.flatFee}
+                            </Text>
+                            <Text style={[styles.propertyAddress, { marginLeft: 8 }]}>
+                              by {bid.cleanerName}
+                            </Text>
+                          </View>
+                          
+                          {/* Property Details */}
+                          {job && (
+                            <View style={{ 
+                              backgroundColor: '#FEE2E2', 
+                              padding: 8, 
+                              borderRadius: 6, 
+                              marginBottom: 8,
+                              borderLeftWidth: 3,
+                              borderLeftColor: urgencyColor
+                            }}>
+                              <Text style={{ fontSize: 11, fontWeight: '600', color: urgencyColor, marginBottom: 4 }}>
+                                Property Details:
+                              </Text>
+                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                                <Text style={{ fontSize: 10, color: '#991B1B' }}>
+                                  🏠 {job.bedrooms || 0} bed{(job.bedrooms || 0) !== 1 ? 's' : ''}
+                                </Text>
+                                <Text style={{ fontSize: 10, color: '#991B1B' }}>
+                                  🚿 {job.bathrooms || 0} bath{(job.bathrooms || 0) !== 1 ? 's' : ''}
+                                </Text>
+                                <Text style={{ fontSize: 10, color: '#991B1B' }}>
+                                  🛏️ {job.beds || 0} bed{(job.beds || 0) !== 1 ? 's' : ''}
+                                </Text>
+                                <Text style={{ fontSize: 10, color: '#991B1B' }}>
+                                  📐 {job.unitSize || 'N/A'} sq ft
+                                </Text>
+                              </View>
+                            </View>
+                          )}
+                          
+                          {bid.message && (
+                            <View style={{ 
+                              backgroundColor: '#F8FAFC', 
+                              padding: 8, 
+                              borderRadius: 6, 
+                              marginBottom: 8 
+                            }}>
+                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#64748B', marginBottom: 2 }}>
+                                Message:
+                              </Text>
+                              <Text style={{ fontSize: 12, color: '#475569', lineHeight: 16 }}>
+                                {bid.message}
+                              </Text>
+                            </View>
+                          )}
+                          
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                            <Ionicons name="time" size={12} color={urgencyColor} />
+                            <Text style={{ fontSize: 11, color: urgencyColor, marginLeft: 4, fontWeight: '600' }}>
+                              {job?.urgencyLevel?.toUpperCase().replace('-', ' ')} PRIORITY
+                            </Text>
+                            <Text style={{ fontSize: 11, color: '#64748B', marginLeft: 12 }}>
+                              Bid submitted {new Date(bid.bidDate).toLocaleString()}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                      
+                      <View style={[styles.propertyActions, { gap: 12 }]}>
+                        <TouchableOpacity 
+                          style={[styles.actionButton, { 
+                            backgroundColor: '#10B981', 
+                            flex: 1 
+                          }]}
+                          onPress={() => handleAcceptEmergencyBid(bid)}
+                        >
+                          <Ionicons name="checkmark-circle" size={16} color="white" />
+                          <Text style={[styles.actionButtonText, { color: 'white', fontWeight: '700' }]}>
+                            Accept Bid
+                          </Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                          style={[styles.actionButton, { 
+                            backgroundColor: '#EF4444', 
+                            flex: 1 
+                          }]}
+                          onPress={() => handleRejectEmergencyBid(bid)}
+                        >
+                          <Ionicons name="close-circle" size={16} color="white" />
+                          <Text style={[styles.actionButtonText, { color: 'white', fontWeight: '700' }]}>
+                            Reject
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Recent Activity</Text>
               <Text style={{ color: '#666', fontSize: 14 }}>

@@ -130,7 +130,24 @@ export function CleanerScreen({ navigation, route }: any) {
           job.status === 'assigned' || job.status === 'in_progress'
         );
         
+        // Sort with emergency jobs first, then by date
         myJobs.sort((a, b) => {
+          // Emergency jobs always come first
+          if (a.isEmergency && !b.isEmergency) return -1;
+          if (!a.isEmergency && b.isEmergency) return 1;
+          
+          // If both are emergency or both are regular, sort by urgency then date
+          if (a.isEmergency && b.isEmergency) {
+            const urgencyOrder = { 'immediate': 0, 'same-day': 1, 'next-day': 2 };
+            const aUrgency = urgencyOrder[a.urgencyLevel || 'next-day'];
+            const bUrgency = urgencyOrder[b.urgencyLevel || 'next-day'];
+            
+            if (aUrgency !== bUrgency) {
+              return aUrgency - bUrgency;
+            }
+          }
+          
+          // Sort by preferred date
           if (a.preferredDate && b.preferredDate) {
             return a.preferredDate - b.preferredDate;
           }
@@ -714,45 +731,93 @@ export function CleanerScreen({ navigation, route }: any) {
                           style={[
                             styles.userFriendlyCard,
                             selectedJob?.id === job.id && styles.selectedCard,
+                            job.isEmergency && styles.emergencyCard,
                             { marginBottom: 16 }
                           ]}
                         >
+                          {/* Emergency Priority Banner */}
+                          {job.isEmergency && (
+                            <View style={[styles.emergencyBanner, { 
+                              backgroundColor: job.urgencyLevel === 'immediate' ? '#DC2626' : 
+                                             job.urgencyLevel === 'same-day' ? '#EA580C' : '#D97706'
+                            }]}>
+                              <Ionicons name="warning" size={16} color="white" />
+                              <Text style={styles.emergencyBannerText}>
+                                🚨 EMERGENCY - {job.urgencyLevel?.toUpperCase().replace('-', ' ')} PRIORITY
+                              </Text>
+                              <Text style={styles.emergencyFeeText}>${job.emergencyFee}</Text>
+                            </View>
+                          )}
+                          
                           <TouchableOpacity 
                             style={styles.jobInfoArea}
                             onPress={() => handleJobClick(job)}
                             activeOpacity={0.7}
                           >
                             <View style={styles.jobHeader}>
-                              <View style={styles.jobIconContainer}>
+                              <View style={[
+                                styles.jobIconContainer,
+                                job.isEmergency && { backgroundColor: '#FEE2E2' }
+                              ]}>
                                 <Ionicons 
-                                  name="location" 
+                                  name={job.isEmergency ? "flash" : "location"} 
                                   size={20} 
-                                  color={selectedJob?.id === job.id ? '#EF4444' : '#1E88E5'} 
+                                  color={
+                                    job.isEmergency ? '#DC2626' :
+                                    selectedJob?.id === job.id ? '#EF4444' : '#1E88E5'
+                                  } 
                                 />
                               </View>
                               <View style={styles.jobMainInfo}>
-                                <Text style={[
-                                  styles.jobTitle,
-                                  selectedJob?.id === job.id && { color: '#EF4444' }
-                                ]} numberOfLines={1}>{job.address}</Text>
+                                <View style={styles.jobTitleRow}>
+                                  <Text style={[
+                                    styles.jobTitle,
+                                    selectedJob?.id === job.id && { color: '#EF4444' },
+                                    job.isEmergency && { color: '#DC2626' }
+                                  ]} numberOfLines={1}>{job.address}</Text>
+                                  {job.isEmergency && (
+                                    <View style={styles.emergencyIndicator}>
+                                      <Text style={styles.emergencyIndicatorText}>URGENT</Text>
+                                    </View>
+                                  )}
+                                </View>
                                 <View style={styles.jobMetadata}>
-                                  <Text style={styles.jobTime}>
+                                  <Text style={[
+                                    styles.jobTime,
+                                    job.isEmergency && { color: '#991B1B', fontWeight: '600' }
+                                  ]}>
                                     {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'No date'} • {job.preferredTime || '10:00 AM'}
                                   </Text>
                                   {job.guestName && (
                                     <Text style={styles.jobGuest}>Guest: {job.guestName}</Text>
                                   )}
+                                  {job.isEmergency && job.emergencyReason && (
+                                    <Text style={styles.emergencyReasonText} numberOfLines={2}>
+                                      Emergency: {job.emergencyReason}
+                                    </Text>
+                                  )}
                                 </View>
                               </View>
                               <View style={styles.jobStatusContainer}>
-                                <View style={[styles.statusPill, { backgroundColor: getStatusColor(job.status) + '20' }]}>
-                                  <Text style={[styles.statusPillText, { color: getStatusColor(job.status) }]}>
+                                <View style={[
+                                  styles.statusPill, 
+                                  { backgroundColor: job.isEmergency ? '#FEE2E2' : getStatusColor(job.status) + '20' }
+                                ]}>
+                                  <Text style={[
+                                    styles.statusPillText, 
+                                    { color: job.isEmergency ? '#DC2626' : getStatusColor(job.status) }
+                                  ]}>
                                     {job.status === 'assigned' ? 'Ready' : 'In Progress'}
                                   </Text>
                                 </View>
-                                {job.status === 'assigned' && (
+                                {job.status === 'assigned' && !job.isEmergency && (
                                   <View style={styles.newIndicator}>
                                     <Text style={styles.newIndicatorText}>NEW</Text>
+                                  </View>
+                                )}
+                                {job.isEmergency && (
+                                  <View style={styles.emergencyPriorityIndicator}>
+                                    <Text style={styles.emergencyPriorityText}>TOP PRIORITY</Text>
                                   </View>
                                 )}
                               </View>
@@ -1747,5 +1812,74 @@ const styles = StyleSheet.create({
   },
   activeTabText: {
     color: '#1E88E5',
+  },
+  // Emergency job styles
+  emergencyCard: {
+    borderColor: '#FEE2E2',
+    borderWidth: 2,
+    backgroundColor: '#FEF2F2',
+    shadowColor: '#DC2626',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  emergencyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 0,
+  },
+  emergencyBannerText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '800',
+    flex: 1,
+    marginLeft: 8,
+    letterSpacing: 0.5,
+  },
+  emergencyFeeText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  jobTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  emergencyIndicator: {
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  emergencyIndicatorText: {
+    color: 'white',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  emergencyReasonText: {
+    fontSize: 12,
+    color: '#991B1B',
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
+  emergencyPriorityIndicator: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#DC2626',
+  },
+  emergencyPriorityText: {
+    color: '#DC2626',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });

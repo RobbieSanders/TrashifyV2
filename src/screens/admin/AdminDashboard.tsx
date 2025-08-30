@@ -32,6 +32,7 @@ import { UserProfile, ActivityLogEntry } from '../../services/userService';
 import { Job, UserStats, ActivityLog } from '../../utils/types';
 import { useAuthStore } from '../../stores/authStore';
 import PropertyCleanupTool from '../../components/PropertyCleanupTool';
+import { EmergencyCleaningDebugTool } from '../../components/EmergencyCleaningDebugTool';
 
 interface AdminStats {
   totalHosts: number;
@@ -603,6 +604,9 @@ export function AdminDashboard({ navigation }: any) {
         <ScrollView style={styles.tabContent}>
           <Text style={styles.sectionTitle}>Admin Tools</Text>
           <PropertyCleanupTool />
+          
+          {/* Emergency Cleaning Debug Tool */}
+          <EmergencyCleaningDebugTool />
         </ScrollView>
       )}
 

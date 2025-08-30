@@ -26,6 +26,8 @@ import {
 } from '../../services/cleanerRecruitmentService';
 import { CleanerRecruitment, CleanerBid } from '../../utils/types';
 import { geocodeAddressCrossPlatform } from '../../services/geocodingService';
+import { collection, query, where, onSnapshot, doc, updateDoc, getDocs } from 'firebase/firestore';
+import { db } from '../../utils/firebase';
 
 export function SearchCleanersScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
@@ -36,6 +38,7 @@ export function SearchCleanersScreen({ navigation }: any) {
   const [recruitmentBids, setRecruitmentBids] = useState<CleanerBid[]>([]);
   const [showBidsModal, setShowBidsModal] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [emergencyBids, setEmergencyBids] = useState<any[]>([]);
 
   // Property selection
   const [useExistingProperty, setUseExistingProperty] = useState(true);
@@ -75,6 +78,9 @@ export function SearchCleanersScreen({ navigation }: any) {
     }
   }, [user?.uid]);
 
+  // Emergency jobs states
+  const [myEmergencyJobs, setMyEmergencyJobs] = useState<any[]>([]);
+
   // Subscribe to host's recruitment posts
   useEffect(() => {
     if (!user?.uid) return;
@@ -85,6 +91,67 @@ export function SearchCleanersScreen({ navigation }: any) {
 
     return () => unsubscribe();
   }, [user?.uid]);
+
+  // Subscribe to host's emergency jobs and their bids
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const emergencyJobsRef = collection(db, 'cleaningJobs');
+    const emergencyJobsQuery = query(
+      emergencyJobsRef,
+      where('hostId', '==', user.uid),
+      where('isEmergency', '==', true),
+      where('status', 'in', ['bidding', 'open'])
+    );
+    
+    const unsubscribe = onSnapshot(emergencyJobsQuery, (snapshot) => {
+      const jobs: any[] = [];
+      snapshot.forEach((doc) => {
+        jobs.push({ id: doc.id, ...doc.data() });
+      });
+      setMyEmergencyJobs(jobs);
+    }, (error) => {
+      console.error('[SearchCleaners] Error loading emergency jobs:', error);
+      setMyEmergencyJobs([]);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  // Subscribe to emergency bids for host's jobs
+  useEffect(() => {
+    if (!user?.uid || myEmergencyJobs.length === 0) return;
+
+    const emergencyBidsRef = collection(db, 'emergencyBids');
+    const emergencyBidsQuery = query(
+      emergencyBidsRef,
+      where('status', '==', 'pending')
+    );
+    
+    const unsubscribe = onSnapshot(emergencyBidsQuery, async (snapshot) => {
+      const bids: any[] = [];
+      
+      // Get all pending emergency bids
+      for (const bidDoc of snapshot.docs) {
+        const bidData = { id: bidDoc.id, ...bidDoc.data() } as any;
+        
+        // Check if this bid is for one of this host's emergency jobs
+        const jobForBid = myEmergencyJobs.find(job => job.id === bidData.cleaningJobId);
+        if (jobForBid) {
+          // Add job details to the bid
+          bidData.jobDetails = jobForBid;
+          bids.push(bidData);
+        }
+      }
+      
+      setEmergencyBids(bids);
+    }, (error) => {
+      console.error('[SearchCleaners] Error loading emergency bids:', error);
+      setEmergencyBids([]);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid, myEmergencyJobs]);
 
   // Subscribe to bids when a recruitment is selected
   useEffect(() => {
@@ -349,6 +416,101 @@ export function SearchCleanersScreen({ navigation }: any) {
     );
   };
 
+  // Handle accepting an emergency bid
+  const handleAcceptEmergencyBid = async (bid: any) => {
+    if (!user?.uid || !bid.cleaningJobId || !bid.cleanerId) return;
+    
+    Alert.alert(
+      'Accept Emergency Bid',
+      `Accept ${bid.cleanerName}'s bid of $${bid.flatFee} for this emergency cleaning?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Accept',
+          style: 'default',
+          onPress: async () => {
+            try {
+              // 1. Update the emergency job to assign it to the cleaner
+              const jobRef = doc(db, 'cleaningJobs', bid.cleaningJobId);
+              await updateDoc(jobRef, {
+                assignedCleanerId: bid.cleanerId,
+                assignedCleanerName: bid.cleanerName,
+                status: 'assigned',
+                flatFee: bid.flatFee,
+                assignedAt: Date.now(),
+                updatedAt: Date.now()
+              });
+
+              // 2. Update the accepted bid status
+              const bidRef = doc(db, 'emergencyBids', bid.id);
+              await updateDoc(bidRef, {
+                status: 'accepted',
+                acceptedAt: Date.now()
+              });
+
+              // 3. Reject all other bids for the same job
+              const otherBidsQuery = query(
+                collection(db, 'emergencyBids'),
+                where('cleaningJobId', '==', bid.cleaningJobId),
+                where('status', '==', 'pending')
+              );
+              
+              const otherBidsSnapshot = await getDocs(otherBidsQuery);
+              for (const otherBidDoc of otherBidsSnapshot.docs) {
+                if (otherBidDoc.id !== bid.id) {
+                  await updateDoc(otherBidDoc.ref, {
+                    status: 'rejected',
+                    rejectedAt: Date.now()
+                  });
+                }
+              }
+
+              Alert.alert(
+                'Emergency Bid Accepted!',
+                `${bid.cleanerName} has been assigned to your emergency cleaning. They will be notified immediately.`
+              );
+            } catch (error) {
+              console.error('Error accepting emergency bid:', error);
+              Alert.alert('Error', 'Failed to accept emergency bid. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Handle rejecting an emergency bid
+  const handleRejectEmergencyBid = async (bid: any) => {
+    if (!user?.uid) return;
+    
+    Alert.alert(
+      'Reject Emergency Bid',
+      `Reject ${bid.cleanerName}'s bid of $${bid.flatFee}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Update the bid status to rejected
+              const bidRef = doc(db, 'emergencyBids', bid.id);
+              await updateDoc(bidRef, {
+                status: 'rejected',
+                rejectedAt: Date.now()
+              });
+
+              Alert.alert('Bid Rejected', `${bid.cleanerName}'s bid has been rejected.`);
+            } catch (error) {
+              console.error('Error rejecting emergency bid:', error);
+              Alert.alert('Error', 'Failed to reject emergency bid. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   return (
     <>
       <ScrollView style={styles.container}>
@@ -373,7 +535,181 @@ export function SearchCleanersScreen({ navigation }: any) {
         {/* My Recruitment Posts */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>My Recruitment Posts</Text>
-          {myRecruitments.length === 0 ? (
+          
+          {/* Emergency Jobs Section */}
+          {myEmergencyJobs.length > 0 && (
+            <>
+              <View style={styles.emergencyJobsHeader}>
+                <View style={styles.emergencyHeaderLeft}>
+                  <Ionicons name="warning" size={20} color="#DC2626" />
+                  <Text style={styles.emergencyJobsTitle}>🚨 Emergency Cleanings</Text>
+                </View>
+                <View style={styles.emergencyBadge}>
+                  <Text style={styles.emergencyBadgeText}>{myEmergencyJobs.length} ACTIVE</Text>
+                </View>
+              </View>
+              
+              {myEmergencyJobs.map(job => {
+                const urgencyColor = job.urgencyLevel === 'immediate' ? '#DC2626' : 
+                                   job.urgencyLevel === 'same-day' ? '#EA580C' : '#D97706';
+                
+                return (
+                  <View key={job.id} style={[styles.recruitmentCard, styles.emergencyJobCard]}>
+                    <View style={styles.cardHeader}>
+                      <View style={styles.emergencyJobHeader}>
+                        <View style={[styles.emergencyJobIcon, { backgroundColor: urgencyColor }]}>
+                          <Ionicons name="flash" size={16} color="white" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.recruitmentTitle, { color: urgencyColor }]}>
+                            EMERGENCY CLEANING
+                          </Text>
+                          <Text style={styles.emergencyJobAddress}>
+                            {job.address}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={[styles.statusBadge, { backgroundColor: '#FEE2E2' }]}>
+                        <Text style={[styles.statusText, { color: '#DC2626' }]}>
+                          {job.status.toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.emergencyJobDetails}>
+                      <Text style={styles.emergencyJobUrgency}>
+                        {job.urgencyLevel?.toUpperCase().replace('-', ' ')} PRIORITY
+                      </Text>
+                      <Text style={styles.emergencyJobDate}>
+                        {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'ASAP'} at {job.preferredTime || 'Flexible'}
+                      </Text>
+                      {job.emergencyReason && (
+                        <Text style={styles.emergencyJobReason}>
+                          Reason: {job.emergencyReason}
+                        </Text>
+                      )}
+                    </View>
+                    
+                    <View style={styles.cardFooter}>
+                      <View style={styles.infoRow}>
+                        <Ionicons name="flash" size={16} color="#DC2626" />
+                        <Text style={[styles.infoText, { color: '#DC2626' }]}>
+                          Emergency bidding active
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <TouchableOpacity
+                      style={[styles.closeButton, { backgroundColor: '#DC2626' }]}
+                      onPress={() => {
+                        Alert.alert(
+                          'Withdraw Emergency Job',
+                          'Are you sure you want to withdraw this emergency cleaning from the marketplace?',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Withdraw',
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  const jobRef = doc(db, 'cleaningJobs', job.id);
+                                  await updateDoc(jobRef, {
+                                    status: 'cancelled',
+                                    cancelledAt: Date.now()
+                                  });
+                                  Alert.alert('Success', 'Emergency job withdrawn from marketplace');
+                                } catch (error) {
+                                  console.error('Error withdrawing emergency job:', error);
+                                  Alert.alert('Error', 'Failed to withdraw emergency job');
+                                }
+                              }
+                            }
+                          ]
+                        );
+                      }}
+                    >
+                      <Text style={[styles.closeButtonText, { color: 'white' }]}>Withdraw from Market</Text>
+                    </TouchableOpacity>
+                    
+                    {/* Display emergency bids for this job */}
+                    {emergencyBids.filter(bid => bid.cleaningJobId === job.id).map(bid => (
+                      <View key={bid.id} style={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 8,
+                        padding: 12,
+                        marginTop: 12,
+                        borderWidth: 1,
+                        borderColor: '#FCA5A5'
+                      }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#0F172A' }}>
+                              {bid.cleanerName}
+                            </Text>
+                            <Text style={{ fontSize: 16, fontWeight: '700', color: '#10B981', marginTop: 2 }}>
+                              ${bid.flatFee}
+                            </Text>
+                            {bid.message && (
+                              <Text style={{ fontSize: 12, color: '#64748B', marginTop: 4, fontStyle: 'italic' }}>
+                                "{bid.message}"
+                              </Text>
+                            )}
+                          </View>
+                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity
+                              onPress={() => handleAcceptEmergencyBid(bid)}
+                              style={{
+                                backgroundColor: '#10B981',
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                borderRadius: 6,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 4
+                              }}
+                            >
+                              <Ionicons name="checkmark" size={14} color="white" />
+                              <Text style={{ 
+                                color: 'white', 
+                                fontSize: 12, 
+                                fontWeight: '600' 
+                              }}>
+                                Accept
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => handleRejectEmergencyBid(bid)}
+                              style={{
+                                backgroundColor: '#EF4444',
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                borderRadius: 6,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 4
+                              }}
+                            >
+                              <Ionicons name="close" size={14} color="white" />
+                              <Text style={{ 
+                                color: 'white', 
+                                fontSize: 12, 
+                                fontWeight: '600' 
+                              }}>
+                                Deny
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })}
+            </>
+          )}
+          
+          {/* Regular Team Recruitment Posts */}
+          {myRecruitments.length === 0 && myEmergencyJobs.length === 0 ? (
             <Text style={styles.emptyText}>No recruitment posts yet</Text>
           ) : (
             myRecruitments.map(recruitment => (
@@ -1446,5 +1782,83 @@ const styles = StyleSheet.create({
   picker: {
     height: 50,
     color: '#0F172A',
+  },
+  // Emergency job styles
+  emergencyJobsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: '#FEF2F2',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+  },
+  emergencyHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  emergencyJobsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#DC2626',
+    marginLeft: 8,
+  },
+  emergencyBadge: {
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  emergencyBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  emergencyJobCard: {
+    borderColor: '#DC2626',
+    borderWidth: 2,
+    backgroundColor: '#FEF2F2',
+  },
+  emergencyJobHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  emergencyJobIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  emergencyJobAddress: {
+    fontSize: 14,
+    color: '#991B1B',
+    fontWeight: '500',
+  },
+  emergencyJobDetails: {
+    backgroundColor: '#FEE2E2',
+    padding: 8,
+    borderRadius: 6,
+    marginVertical: 8,
+  },
+  emergencyJobUrgency: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  emergencyJobDate: {
+    fontSize: 12,
+    color: '#991B1B',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  emergencyJobReason: {
+    fontSize: 11,
+    color: '#991B1B',
+    fontStyle: 'italic',
   },
 });

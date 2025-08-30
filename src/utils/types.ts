@@ -50,7 +50,7 @@ export interface CleaningJob {
   state?: string;
   zipCode?: string;
   destination: Coordinates;
-  status: 'open' | 'assigned' | 'in_progress' | 'completed' | 'cancelled' | 'scheduled' | 'pending';
+  status: 'open' | 'assigned' | 'in_progress' | 'completed' | 'cancelled' | 'scheduled' | 'pending' | 'bidding';
   createdAt: number;
   acceptedAt?: number;
   completedAt?: number;
@@ -76,11 +76,27 @@ export interface CleaningJob {
   
   notes?: string;
   
+  // Property details (for emergency cleanings and regular cleanings)
+  bedrooms?: number;
+  beds?: number;
+  bathrooms?: number;
+  unitSize?: number; // square feet
+  unitSizeUnknown?: boolean;
+  
   // Cleaning specific fields
   cleaningType?: 'standard' | 'deep' | 'emergency' | 'checkout';
   estimatedDuration?: number; // in hours
   preferredDate?: number;
   preferredTime?: string;
+  
+  // Emergency cleaning specific fields
+  isEmergency?: boolean;
+  emergencyFee?: number; // Higher rate for emergency cleanings
+  urgencyLevel?: 'immediate' | 'same-day' | 'next-day';
+  emergencyNotes?: string; // Special instructions for emergency
+  emergencyReason?: string; // Why this is an emergency
+  minimumNoticeHours?: number; // Minimum notice required (default 3)
+  isOneTimeJob?: boolean; // True for emergency cleanings (no team joining)
   
   // Queue management for cleaners
   cleanerPriority?: number; // Priority in cleaner's queue

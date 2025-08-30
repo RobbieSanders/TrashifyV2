@@ -13,16 +13,18 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../stores/authStore';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, where, onSnapshot, addDoc, getDoc } from 'firebase/firestore';
 import { db } from '../../utils/firebase';
 import {
   subscribeToOpenRecruitments,
   subscribeToFilteredRecruitments,
+  subscribeToFilteredEmergencyJobs,
   submitBid,
   getCleanerBidHistory,
   withdrawBid
 } from '../../services/cleanerRecruitmentService';
-import { CleanerRecruitment, CleanerBid } from '../../utils/types';
+import { geocodeAddressCrossPlatform } from '../../services/geocodingService';
+import { CleanerRecruitment, CleanerBid, CleaningJob } from '../../utils/types';
 import { calculateDistanceGoogle } from '../../services/googleGeocodingService';
 
 const { width } = Dimensions.get('window');
@@ -30,9 +32,12 @@ const { width } = Dimensions.get('window');
 export function CleanerBiddingScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
   const [openRecruitments, setOpenRecruitments] = useState<CleanerRecruitment[]>([]);
+  const [emergencyJobs, setEmergencyJobs] = useState<CleaningJob[]>([]);
   const [myBids, setMyBids] = useState<CleanerBid[]>([]);
   const [selectedRecruitment, setSelectedRecruitment] = useState<CleanerRecruitment | null>(null);
+  const [selectedEmergencyJob, setSelectedEmergencyJob] = useState<CleaningJob | null>(null);
   const [showBidModal, setShowBidModal] = useState(false);
+  const [showEmergencyBidModal, setShowEmergencyBidModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingBids, setLoadingBids] = useState(true);
   const [sortBy, setSortBy] = useState<'newest' | 'turnovers' | 'location'>('newest');
@@ -46,6 +51,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
   const [specialties, setSpecialties] = useState<string[]>([]);
   const [showApplicationModal, setShowApplicationModal] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<CleanerBid | null>(null);
+  const [activeTab, setActiveTab] = useState<'team' | 'emergency'>('team');
 
   // Availability options
   const availabilityOptions = [
@@ -67,15 +73,76 @@ export function CleanerBiddingScreen({ navigation }: any) {
     'Pet-Friendly'
   ];
 
-  // Subscribe to filtered recruitment posts based on cleaner's service address
+  // Subscribe to filtered recruitment posts with radius monitoring for real-time updates
   useEffect(() => {
     if (!user?.uid) return;
     
-    const unsubscribe = subscribeToFilteredRecruitments(user.uid, (recruitments) => {
-      setOpenRecruitments(recruitments);
+    let unsubscribe: (() => void) | null = null;
+    
+    // Subscribe to user profile changes to detect radius updates
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribeUser = onSnapshot(userDocRef, (userDoc) => {
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const cleanerProfile = userData.cleanerProfile;
+        
+        // If cleaner profile or radius changed, re-subscribe to recruitments
+        if (cleanerProfile?.serviceRadiusMiles || cleanerProfile?.serviceCoordinates) {
+          console.log('[CleanerBidding] Cleaner profile updated, re-subscribing to recruitments');
+          
+          // Unsubscribe from previous recruitments listener
+          if (unsubscribe) {
+            unsubscribe();
+          }
+          
+          // Subscribe to recruitments with updated profile
+          unsubscribe = subscribeToFilteredRecruitments(user.uid, (recruitments) => {
+            setOpenRecruitments(recruitments);
+          });
+        }
+      }
     });
+    
+    return () => {
+      if (unsubscribe) unsubscribe();
+      unsubscribeUser();
+    };
+  }, [user?.uid]);
 
-    return () => unsubscribe();
+  // Subscribe to filtered emergency jobs with radius monitoring for real-time updates
+  useEffect(() => {
+    if (!user?.uid) return;
+    
+    let unsubscribe: (() => void) | null = null;
+    
+    // Subscribe to user profile changes to detect radius updates
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribeUser = onSnapshot(userDocRef, (userDoc) => {
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const cleanerProfile = userData.cleanerProfile;
+        
+        // If cleaner profile or radius changed, re-subscribe to emergency jobs
+        if (cleanerProfile?.serviceRadiusMiles || cleanerProfile?.serviceCoordinates) {
+          console.log('[CleanerBidding] Cleaner profile updated, re-subscribing to emergency jobs');
+          
+          // Unsubscribe from previous emergency jobs listener
+          if (unsubscribe) {
+            unsubscribe();
+          }
+          
+          // Subscribe to emergency jobs with updated profile
+          unsubscribe = subscribeToFilteredEmergencyJobs(user.uid, (jobs) => {
+            setEmergencyJobs(jobs as CleaningJob[]);
+          });
+        }
+      }
+    });
+    
+    return () => {
+      if (unsubscribe) unsubscribe();
+      unsubscribeUser();
+    };
   }, [user?.uid]);
 
   // Load cleaner's bid history - optimized with useCallback
@@ -90,6 +157,32 @@ export function CleanerBiddingScreen({ navigation }: any) {
     } finally {
       setLoadingBids(false);
     }
+  }, [user?.uid]);
+
+  // Load emergency bids for this cleaner
+  const [myEmergencyBids, setMyEmergencyBids] = useState<any[]>([]);
+  
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const emergencyBidsRef = collection(db, 'emergencyBids');
+    const myEmergencyBidsQuery = query(
+      emergencyBidsRef,
+      where('cleanerId', '==', user.uid)
+    );
+    
+    const unsubscribe = onSnapshot(myEmergencyBidsQuery, (snapshot) => {
+      const bids: any[] = [];
+      snapshot.forEach((doc) => {
+        bids.push({ id: doc.id, ...doc.data() });
+      });
+      setMyEmergencyBids(bids);
+    }, (error) => {
+      console.error('[CleanerBidding] Error loading emergency bids:', error);
+      setMyEmergencyBids([]);
+    });
+
+    return () => unsubscribe();
   }, [user?.uid]);
 
   useEffect(() => {
@@ -318,7 +411,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
         </View>
 
         {/* My Applications Section */}
-        {!loadingBids && myBids.length > 0 && myBids.some(bid => bid.recruitmentId) && (
+        {!loadingBids && (myBids.length > 0 || myEmergencyBids.length > 0) && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>My Applications</Text>
@@ -327,9 +420,73 @@ export function CleanerBiddingScreen({ navigation }: any) {
               </TouchableOpacity>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+              {/* Emergency Bids - Show first with red styling, only pending/under review */}
+              {myEmergencyBids.filter(bid => bid.status === 'pending').slice(0, 3).map(bid => (
+                <TouchableOpacity 
+                  key={`emergency-${bid.id}`} 
+                  style={[styles.applicationCard, styles.emergencyApplicationCard]}
+                  onPress={() => {
+                    // Show detailed emergency bid information including message
+                    const statusText = bid.status === 'pending' ? 'Under Review' : 
+                                     bid.status.charAt(0).toUpperCase() + bid.status.slice(1);
+                    
+                    let alertMessage = `Status: ${statusText}\nRate: $${bid.flatFee}\nSubmitted: ${new Date(bid.bidDate).toLocaleDateString()}`;
+                    
+                    if (bid.urgencyLevel) {
+                      alertMessage += `\nUrgency: ${bid.urgencyLevel.toUpperCase().replace('-', ' ')}`;
+                    }
+                    
+                    if (bid.message) {
+                      alertMessage += `\n\nYour Message:\n"${bid.message}"`;
+                    }
+                    
+                    Alert.alert('Emergency Bid Details', alertMessage, [{ text: 'OK' }]);
+                  }}
+                >
+                  <View style={[styles.applicationStatus, styles.emergencyApplicationStatus]}>
+                    <Ionicons name="flash" size={12} color="white" />
+                    <Text style={styles.applicationStatusText}>EMERGENCY</Text>
+                  </View>
+                  <View style={[styles.applicationStatus,
+                    bid.status === 'accepted' && styles.statusAccepted,
+                    bid.status === 'rejected' && styles.statusRejected,
+                    bid.status === 'pending' && styles.statusPending,
+                    bid.status === 'withdrawn' && styles.statusWithdrawn
+                  ]}>
+                    <Ionicons 
+                      name={
+                        bid.status === 'accepted' ? 'checkmark-circle' :
+                        bid.status === 'rejected' ? 'close-circle' :
+                        bid.status === 'pending' ? 'time' : 'remove-circle'
+                      } 
+                      size={12} 
+                      color="white" 
+                    />
+                    <Text style={styles.applicationStatusText}>
+                      {bid.status === 'pending' ? 'Under Review' : bid.status.charAt(0).toUpperCase() + bid.status.slice(1)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.applicationAmount, { color: '#DC2626' }]}>
+                    ${bid.flatFee || 0}<Text style={styles.applicationAmountSuffix}>/job</Text>
+                  </Text>
+                  <Text style={styles.applicationDate}>
+                    Applied {new Date(bid.bidDate).toLocaleDateString()}
+                  </Text>
+                  {bid.message && (
+                    <View style={styles.emergencyBidMessage}>
+                      <Text style={styles.emergencyBidMessageLabel}>Message:</Text>
+                      <Text style={styles.emergencyBidMessageText} numberOfLines={2}>
+                        {bid.message}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+              
+              {/* Regular Team Bids */}
               {myBids
                 .filter(bid => bid.recruitmentId)
-                .slice(0, 5)
+                .slice(0, 5 - myEmergencyBids.length)
                 .map(bid => (
                 <TouchableOpacity 
                   key={bid.id} 
@@ -378,71 +535,332 @@ export function CleanerBiddingScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* Filters and Sorting */}
-        <View style={styles.filtersSection}>
-          <View style={styles.filtersRow}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll}>
-              <TouchableOpacity
-                style={[styles.filterChip, filterBy === 'all' && styles.filterChipActive]}
-                onPress={() => setFilterBy('all')}
-              >
-                <Text style={[styles.filterChipText, filterBy === 'all' && styles.filterChipTextActive]}>
-                  All
+        {/* Tab Navigation */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'team' && styles.activeTab]}
+            onPress={() => setActiveTab('team')}
+          >
+            <Ionicons 
+              name="people" 
+              size={18} 
+              color={activeTab === 'team' ? '#1E88E5' : '#64748B'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'team' && styles.activeTabText]}>
+              Team Opportunities
+            </Text>
+            {filteredAndSortedRecruitments.length > 0 && (
+              <View style={[styles.tabBadge, activeTab === 'team' && styles.activeTabBadge]}>
+                <Text style={[styles.tabBadgeText, activeTab === 'team' && styles.activeTabBadgeText]}>
+                  {filteredAndSortedRecruitments.length}
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.filterChip, filterBy === 'high-volume' && styles.filterChipActive]}
-                onPress={() => setFilterBy('high-volume')}
-              >
-                <Ionicons name="flash" size={12} color={filterBy === 'high-volume' ? 'white' : '#64748B'} />
-                <Text style={[styles.filterChipText, filterBy === 'high-volume' && styles.filterChipTextActive]}>
-                  High Volume
+              </View>
+            )}
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'emergency' && styles.activeTab]}
+            onPress={() => setActiveTab('emergency')}
+          >
+            <Ionicons 
+              name="warning" 
+              size={18} 
+              color={activeTab === 'emergency' ? '#DC2626' : '#64748B'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'emergency' && styles.activeTabText, activeTab === 'emergency' && { color: '#DC2626' }]}>
+              Emergency Cleanings
+            </Text>
+            {emergencyJobs.length > 0 && (
+              <View style={[styles.tabBadge, { backgroundColor: '#DC2626' }]}>
+                <Text style={styles.tabBadgeText}>
+                  {emergencyJobs.length}
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.filterChip, styles.emergencyChip, filterBy === 'emergency-cleanings' && styles.emergencyChipActive]}
-                onPress={() => setFilterBy('emergency-cleanings')}
-              >
-                <Ionicons name="flash" size={12} color={filterBy === 'emergency-cleanings' ? 'white' : '#EF4444'} />
-                <Text style={[styles.filterChipText, styles.emergencyChipText, filterBy === 'emergency-cleanings' && styles.emergencyChipTextActive]}>
-                  Emergency
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
-            
-            <View style={styles.sortDropdown}>
-              <TouchableOpacity
-                style={styles.sortButton}
-                onPress={() => {
-                  // Cycle through sort options
-                  const options: ('newest' | 'turnovers' | 'location')[] = ['newest', 'turnovers', 'location'];
-                  const currentIndex = options.indexOf(sortBy);
-                  const nextIndex = (currentIndex + 1) % options.length;
-                  setSortBy(options[nextIndex]);
-                }}
-              >
-                <Ionicons 
-                  name={
-                    sortBy === 'newest' ? 'time' :
-                    sortBy === 'turnovers' ? 'trending-up' : 'location'
-                  } 
-                  size={14} 
-                  color="#1E88E5" 
-                />
-                <Text style={styles.sortButtonText}>
-                  {sortBy === 'newest' ? 'Newest' : 
-                   sortBy === 'turnovers' ? 'Volume' : 'Distance'}
-                </Text>
-                <Ionicons name="chevron-down" size={12} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-          </View>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
 
-        {/* Available Opportunities */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Available Opportunities</Text>
-          {filteredAndSortedRecruitments.length === 0 ? (
+        {/* Filters and Sorting - Only show for Team Opportunities tab */}
+        {activeTab === 'team' && (
+          <View style={styles.filtersSection}>
+            <View style={styles.filtersRow}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll}>
+                <TouchableOpacity
+                  style={[styles.filterChip, filterBy === 'all' && styles.filterChipActive]}
+                  onPress={() => setFilterBy('all')}
+                >
+                  <Text style={[styles.filterChipText, filterBy === 'all' && styles.filterChipTextActive]}>
+                    All
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.filterChip, filterBy === 'high-volume' && styles.filterChipActive]}
+                  onPress={() => setFilterBy('high-volume')}
+                >
+                  <Ionicons name="flash" size={12} color={filterBy === 'high-volume' ? 'white' : '#64748B'} />
+                  <Text style={[styles.filterChipText, filterBy === 'high-volume' && styles.filterChipTextActive]}>
+                    High Volume
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+              
+              <View style={styles.sortDropdown}>
+                <TouchableOpacity
+                  style={styles.sortButton}
+                  onPress={() => {
+                    // Cycle through sort options
+                    const options: ('newest' | 'turnovers' | 'location')[] = ['newest', 'turnovers', 'location'];
+                    const currentIndex = options.indexOf(sortBy);
+                    const nextIndex = (currentIndex + 1) % options.length;
+                    setSortBy(options[nextIndex]);
+                  }}
+                >
+                  <Ionicons 
+                    name={
+                      sortBy === 'newest' ? 'time' :
+                      sortBy === 'turnovers' ? 'trending-up' : 'location'
+                    } 
+                    size={14} 
+                    color="#1E88E5" 
+                  />
+                  <Text style={styles.sortButtonText}>
+                    {sortBy === 'newest' ? 'Newest' : 
+                     sortBy === 'turnovers' ? 'Volume' : 'Distance'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={12} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Emergency Cleaning Jobs - Only show in emergency tab */}
+        {activeTab === 'emergency' && (
+          <View style={styles.section}>
+            {emergencyJobs.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="warning-outline" size={48} color="#CBD5E1" />
+                <Text style={styles.emptyStateTitle}>No Emergency Cleanings</Text>
+                <Text style={styles.emptyStateText}>
+                  There are no emergency cleaning requests in your area at the moment. Check back later!
+                </Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.emergencyHeader}>
+              <View style={styles.emergencyHeaderLeft}>
+                <Ionicons name="warning" size={24} color="#DC2626" />
+                <Text style={styles.emergencySectionTitle}>🚨 Emergency Cleanings</Text>
+              </View>
+              <View style={styles.emergencyBadge}>
+                <Text style={styles.emergencyBadgeText}>{emergencyJobs.length} URGENT</Text>
+              </View>
+            </View>
+            
+            {emergencyJobs.map((job) => {
+              // DEBUG: Log the job data to see what property details are available
+              console.log('[CleanerBidding] Emergency job data:', {
+                id: job.id,
+                address: job.address,
+                bedrooms: job.bedrooms,
+                bathrooms: job.bathrooms,
+                beds: job.beds,
+                unitSize: job.unitSize,
+                hasDestination: !!job.destination
+              });
+              
+              const urgencyColor = job.urgencyLevel === 'immediate' ? '#DC2626' : 
+                                 job.urgencyLevel === 'same-day' ? '#EA580C' : '#D97706';
+              const timeLeft = job.preferredDate ? Math.max(0, job.preferredDate - Date.now()) : 0;
+              const hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
+              const minutesLeft = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+              
+              // Check if cleaner has already bid on this emergency job
+              const existingBid = myEmergencyBids.find(bid => bid.cleaningJobId === job.id);
+              
+              // Extract city from address for display (hide full address)
+              const getLocationDisplay = (address: string) => {
+                if (!address) return 'Location not specified';
+                const parts = address.split(',');
+                if (parts.length >= 2) {
+                  return parts[1].trim(); // Return city part
+                }
+                return 'General area'; // Fallback
+              };
+              
+              return (
+                <TouchableOpacity
+                  key={job.id}
+                  style={styles.emergencyCard}
+                  onPress={() => {
+                    if (!existingBid) {
+                      setSelectedEmergencyJob(job);
+                      setShowEmergencyBidModal(true);
+                    }
+                  }}
+                  disabled={!!existingBid}
+                >
+                  {/* Pulsing animation border */}
+                  <View style={[styles.emergencyCardBorder, { borderColor: urgencyColor }]} />
+                  
+                  <View style={styles.emergencyCardHeader}>
+                    <View style={styles.emergencyCardLeft}>
+                      <View style={[styles.emergencyIcon, { backgroundColor: urgencyColor }]}>
+                        <Ionicons name="flash" size={20} color="white" />
+                      </View>
+                      <View style={styles.emergencyInfo}>
+                        <Text style={styles.emergencyTitle}>EMERGENCY CLEANING</Text>
+                        <Text style={styles.emergencyAddress}>{getLocationDisplay(job.address)}</Text>
+                        <Text style={[styles.emergencyUrgency, { color: urgencyColor }]}>
+                          {job.urgencyLevel?.toUpperCase().replace('-', ' ')} • {job.preferredTime || 'ASAP'}
+                        </Text>
+                      </View>
+                    </View>
+                  <View style={styles.emergencyCardRight}>
+                    <Text style={styles.emergencyBidLabel}>BIDDING</Text>
+                    <Text style={styles.emergencyBidSubtext}>Set your rate</Text>
+                    {timeLeft > 0 && (
+                      <Text style={[styles.emergencyTimeLeft, { color: urgencyColor }]}>
+                        {hoursLeft > 0 ? `${hoursLeft}h ${minutesLeft}m` : `${minutesLeft}m`} left
+                      </Text>
+                    )}
+                  </View>
+                  </View>
+
+                  {job.emergencyReason && (
+                    <View style={styles.emergencyReason}>
+                      <Text style={styles.emergencyReasonLabel}>Emergency Reason:</Text>
+                      <Text style={styles.emergencyReasonText}>{job.emergencyReason}</Text>
+                    </View>
+                  )}
+
+                  {/* Property Details Section */}
+                  <View style={styles.emergencyPropertyDetails}>
+                    <Text style={styles.emergencyPropertyTitle}>Property Details:</Text>
+                    <View style={styles.emergencyPropertySpecs}>
+                      <View style={styles.emergencyPropertySpec}>
+                        <Ionicons name="home" size={12} color="#DC2626" />
+                        <Text style={styles.emergencyPropertySpecText}>
+                          {job.bedrooms !== undefined && job.bedrooms !== null ? job.bedrooms : 'N/A'} bedroom{(job.bedrooms || 0) !== 1 ? 's' : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.emergencyPropertySpec}>
+                        <Ionicons name="water" size={12} color="#DC2626" />
+                        <Text style={styles.emergencyPropertySpecText}>
+                          {job.bathrooms !== undefined && job.bathrooms !== null ? job.bathrooms : 'N/A'} bath{(job.bathrooms || 0) !== 1 ? 's' : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.emergencyPropertySpec}>
+                        <Ionicons name="bed" size={12} color="#DC2626" />
+                        <Text style={styles.emergencyPropertySpecText}>
+                          {job.beds !== undefined && job.beds !== null ? job.beds : 'N/A'} bed{(job.beds || 0) !== 1 ? 's' : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.emergencyPropertySpec}>
+                        <Ionicons name="resize" size={12} color="#DC2626" />
+                        <Text style={styles.emergencyPropertySpecText}>
+                          {job.unitSize ? `${job.unitSize} sq ft` : 'Size N/A'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.emergencyDetails}>
+                    <View style={styles.emergencyDetail}>
+                      <Ionicons name="time" size={14} color="#DC2626" />
+                      <Text style={styles.emergencyDetailText}>
+                        {job.estimatedDuration || 2}h duration
+                      </Text>
+                    </View>
+                    <View style={styles.emergencyDetail}>
+                      <Ionicons name="calendar" size={14} color="#DC2626" />
+                      <Text style={styles.emergencyDetailText}>
+                        {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'Today'}
+                      </Text>
+                    </View>
+                    <View style={styles.emergencyDetail}>
+                      <Ionicons name="cash" size={14} color="#DC2626" />
+                      <Text style={styles.emergencyDetailText}>One-time job</Text>
+                    </View>
+                  </View>
+
+                  {existingBid ? (
+                    <View style={styles.emergencyBidButtonContainer}>
+                      <View style={[styles.emergencyBidStatus, {
+                        backgroundColor: existingBid.status === 'accepted' ? '#10B981' :
+                                       existingBid.status === 'rejected' ? '#EF4444' : '#F59E0B'
+                      }]}>
+                        <Ionicons 
+                          name={existingBid.status === 'accepted' ? 'checkmark-circle' :
+                               existingBid.status === 'rejected' ? 'close-circle' : 'time'} 
+                          size={14} 
+                          color="white" 
+                        />
+                        <Text style={styles.emergencyBidStatusText}>
+                          {existingBid.status === 'pending' ? 'BID SUBMITTED' : existingBid.status.toUpperCase()}
+                        </Text>
+                      </View>
+                      {existingBid.status === 'pending' && (
+                        <TouchableOpacity 
+                          style={styles.emergencyWithdrawButton}
+                          onPress={async (e) => {
+                            e.stopPropagation();
+                            Alert.alert(
+                              'Withdraw Emergency Bid',
+                              'Are you sure you want to withdraw your bid for this emergency cleaning?',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                  text: 'Withdraw',
+                                  style: 'destructive',
+                                  onPress: async () => {
+                                    try {
+                                      await updateDoc(doc(db, 'emergencyBids', existingBid.id), {
+                                        status: 'withdrawn',
+                                        withdrawnAt: Date.now()
+                                      });
+                                      Alert.alert('Success', 'Your emergency bid has been withdrawn');
+                                    } catch (error) {
+                                      console.error('Error withdrawing emergency bid:', error);
+                                      Alert.alert('Error', 'Failed to withdraw bid');
+                                    }
+                                  }
+                                }
+                              ]
+                            );
+                          }}
+                        >
+                          <Ionicons name="close-circle" size={14} color="#EF4444" />
+                          <Text style={styles.emergencyWithdrawButtonText}>Withdraw</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ) : (
+                    <TouchableOpacity 
+                      style={[styles.emergencyBidButton, { backgroundColor: urgencyColor }]}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        setSelectedEmergencyJob(job);
+                        setShowEmergencyBidModal(true);
+                      }}
+                    >
+                      <Ionicons name="flash" size={16} color="white" />
+                      <Text style={styles.emergencyBidButtonText}>BID NOW</Text>
+                    </TouchableOpacity>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+              </>
+            )}
+          </View>
+        )}
+
+        {/* Available Opportunities - Only show in team tab */}
+        {activeTab === 'team' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Team Opportunities</Text>
+            {filteredAndSortedRecruitments.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="search" size={48} color="#CBD5E1" />
               <Text style={styles.emptyStateTitle}>No opportunities found</Text>
@@ -674,7 +1092,8 @@ export function CleanerBiddingScreen({ navigation }: any) {
               );
             })
           )}
-        </View>
+          </View>
+        )}
       </ScrollView>
 
       {/* Enhanced Bid Submission Modal */}
@@ -1003,6 +1422,202 @@ export function CleanerBiddingScreen({ navigation }: any) {
                   </>
                 );
               })()}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Emergency Bid Modal */}
+      <Modal
+        visible={showEmergencyBidModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowEmergencyBidModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.modalHeader, { backgroundColor: '#FEF2F2', borderBottomColor: '#FEE2E2' }]}>
+              <View style={styles.emergencyModalHeader}>
+                <Ionicons name="warning" size={24} color="#DC2626" />
+                <Text style={[styles.modalTitle, { color: '#DC2626', marginLeft: 8 }]}>Emergency Cleaning Bid</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowEmergencyBidModal(false)}>
+                <Ionicons name="close" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {selectedEmergencyJob && (
+                <>
+                  <View style={[styles.opportunitySummary, { backgroundColor: '#FEF2F2', borderColor: '#FEE2E2' }]}>
+                    <View style={styles.emergencyJobSummary}>
+                      <Text style={styles.emergencyJobTitle}>🚨 EMERGENCY CLEANING</Text>
+                      <Text style={styles.emergencyJobAddress}>
+                        {/* Hide full address, show only city */}
+                        {(() => {
+                          const parts = selectedEmergencyJob.address.split(',');
+                          return parts.length >= 2 ? parts[1].trim() : 'General area';
+                        })()}
+                      </Text>
+                      <Text style={styles.emergencyJobUrgency}>
+                        {selectedEmergencyJob.urgencyLevel?.toUpperCase().replace('-', ' ')} PRIORITY
+                      </Text>
+                    </View>
+                    
+                    {/* Property Details in Modal */}
+                    <View style={styles.emergencyPropertyDetails}>
+                      <Text style={styles.emergencyPropertyTitle}>Property Details:</Text>
+                      <View style={styles.emergencyPropertySpecs}>
+                        <View style={styles.emergencyPropertySpec}>
+                          <Ionicons name="home" size={12} color="#DC2626" />
+                          <Text style={styles.emergencyPropertySpecText}>
+                            {(selectedEmergencyJob as any).bedrooms !== undefined && (selectedEmergencyJob as any).bedrooms !== null ? (selectedEmergencyJob as any).bedrooms : 'N/A'} bedroom{((selectedEmergencyJob as any).bedrooms || 0) !== 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                        <View style={styles.emergencyPropertySpec}>
+                          <Ionicons name="water" size={12} color="#DC2626" />
+                          <Text style={styles.emergencyPropertySpecText}>
+                            {(selectedEmergencyJob as any).bathrooms !== undefined && (selectedEmergencyJob as any).bathrooms !== null ? (selectedEmergencyJob as any).bathrooms : 'N/A'} bath{((selectedEmergencyJob as any).bathrooms || 0) !== 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                        <View style={styles.emergencyPropertySpec}>
+                          <Ionicons name="bed" size={12} color="#DC2626" />
+                          <Text style={styles.emergencyPropertySpecText}>
+                            {(selectedEmergencyJob as any).beds !== undefined && (selectedEmergencyJob as any).beds !== null ? (selectedEmergencyJob as any).beds : 'N/A'} bed{((selectedEmergencyJob as any).beds || 0) !== 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                        <View style={styles.emergencyPropertySpec}>
+                          <Ionicons name="resize" size={12} color="#DC2626" />
+                          <Text style={styles.emergencyPropertySpecText}>
+                            {(selectedEmergencyJob as any).unitSize ? `${(selectedEmergencyJob as any).unitSize} sq ft` : 'Size N/A'}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.emergencyJobStats}>
+                      <View style={styles.emergencyJobStat}>
+                        <Text style={styles.emergencyJobStatNumber}>{selectedEmergencyJob.estimatedDuration || 2}h</Text>
+                        <Text style={styles.emergencyJobStatLabel}>Duration</Text>
+                      </View>
+                      <View style={styles.emergencyJobStat}>
+                        <Text style={styles.emergencyJobStatNumber}>
+                          {selectedEmergencyJob.preferredDate ? new Date(selectedEmergencyJob.preferredDate).toLocaleDateString() : 'Today'}
+                        </Text>
+                        <Text style={styles.emergencyJobStatLabel}>Date Needed</Text>
+                      </View>
+                    </View>
+                    
+                    {selectedEmergencyJob.emergencyReason && (
+                      <View style={styles.emergencyJobReason}>
+                        <Text style={styles.emergencyJobReasonLabel}>Why it's urgent:</Text>
+                        <Text style={styles.emergencyJobReasonText}>{selectedEmergencyJob.emergencyReason}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.formSection}>
+                    <Text style={[styles.formSectionTitle, { color: '#DC2626' }]}>Submit Your Emergency Bid</Text>
+                    
+                    <View style={styles.emergencyWarning}>
+                      <Ionicons name="alert-circle" size={20} color="#DC2626" />
+                      <Text style={styles.emergencyWarningText}>
+                        This is a one-time emergency cleaning. You will NOT be added to the host's team. Set your rate for this urgent job.
+                      </Text>
+                    </View>
+
+                    <Text style={styles.label}>Your Rate for This Emergency Job *</Text>
+                    <View style={styles.rateInputContainer}>
+                      <View style={styles.rateInput}>
+                        <Text style={styles.dollarSign}>$</Text>
+                        <TextInput
+                          style={styles.rateInputField}
+                          value={flatFee}
+                          onChangeText={setFlatFee}
+                          placeholder="150"
+                          keyboardType="numeric"
+                        />
+                        <Text style={styles.perJob}>/job</Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.label}>Message to Host *</Text>
+                    <TextInput
+                      style={[styles.input, styles.textArea]}
+                      value={message}
+                      onChangeText={setMessage}
+                      placeholder="Explain why you're the right cleaner for this emergency job. Include your availability and any relevant experience..."
+                      multiline
+                      numberOfLines={4}
+                    />
+
+                    <TouchableOpacity
+                      style={[styles.submitButton, { backgroundColor: '#DC2626' }, loading && styles.buttonDisabled]}
+                      onPress={async () => {
+                        if (!selectedEmergencyJob) return;
+                        
+                        if (!flatFee || !message.trim()) {
+                          Alert.alert('Missing Information', 'Please provide your rate and a message to the host');
+                          return;
+                        }
+                        
+                        setLoading(true);
+                        try {
+                          // Create a bid for the emergency job
+                          const bidData = {
+                            cleaningJobId: selectedEmergencyJob.id,
+                            cleanerId: user?.uid,
+                            cleanerName: `${user?.firstName} ${user?.lastName}`.trim() || user?.email?.split('@')[0] || 'Cleaner',
+                            flatFee: parseFloat(flatFee),
+                            message: message.trim(),
+                            bidDate: Date.now(),
+                            status: 'pending',
+                            isEmergencyBid: true,
+                            urgencyLevel: selectedEmergencyJob.urgencyLevel,
+                            completedJobs: user?.cleanerProfile?.totalCleanings || 0,
+                            cleanerEmail: user?.email,
+                            cleanerPhone: user?.phone,
+                            rating: user?.cleanerProfile?.rating || 0
+                          };
+
+                          await addDoc(collection(db, 'emergencyBids'), bidData);
+
+                          Alert.alert(
+                            'Emergency Bid Submitted!',
+                            'Your bid has been submitted for this emergency cleaning. The host will review it and respond quickly due to the urgent nature.',
+                            [
+                              {
+                                text: 'OK',
+                                onPress: () => {
+                                  setShowEmergencyBidModal(false);
+                                  // Reset form
+                                  setFlatFee('');
+                                  setMessage('');
+                                }
+                              }
+                            ]
+                          );
+                        } catch (error) {
+                          console.error('Error submitting emergency bid:', error);
+                          Alert.alert('Error', 'Failed to submit emergency bid. Please try again.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <ActivityIndicator color="white" />
+                      ) : (
+                        <>
+                          <Ionicons name="flash" size={20} color="white" style={{ marginRight: 8 }} />
+                          <Text style={styles.submitButtonText}>Submit Emergency Bid</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -1810,5 +2425,421 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
+  },
+  // Emergency cleaning styles
+  emergencyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    backgroundColor: '#FEF2F2',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#FEE2E2',
+  },
+  emergencyHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  emergencySectionTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#DC2626',
+    marginLeft: 8,
+  },
+  emergencyBadge: {
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  emergencyBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  emergencyCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 3,
+    borderColor: '#FEE2E2',
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+    position: 'relative',
+  },
+  emergencyCardBorder: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: 18,
+    borderWidth: 2,
+  },
+  emergencyCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  emergencyCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+  },
+  emergencyIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  emergencyInfo: {
+    flex: 1,
+  },
+  emergencyTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#DC2626',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  emergencyAddress: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  emergencyUrgency: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  emergencyCardRight: {
+    alignItems: 'flex-end',
+  },
+  emergencyFee: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
+  emergencyFeeLabel: {
+    fontSize: 10,
+    color: '#991B1B',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  emergencyTimeLeft: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  emergencyReason: {
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#DC2626',
+  },
+  emergencyReasonLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
+    marginBottom: 4,
+  },
+  emergencyReasonText: {
+    fontSize: 13,
+    color: '#991B1B',
+    lineHeight: 18,
+  },
+  emergencyDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  emergencyDetail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  emergencyDetailText: {
+    fontSize: 11,
+    color: '#991B1B',
+    marginLeft: 4,
+    fontWeight: '600',
+  },
+  emergencyBidButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  emergencyBidButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '800',
+    marginLeft: 6,
+    letterSpacing: 0.5,
+  },
+  // Emergency modal styles
+  emergencyModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  emergencyJobSummary: {
+    marginBottom: 16,
+  },
+  emergencyJobTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#DC2626',
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  emergencyJobAddress: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  emergencyJobUrgency: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#DC2626',
+  },
+  emergencyJobStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+  },
+  emergencyJobStat: {
+    alignItems: 'center',
+  },
+  emergencyJobStatNumber: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
+  emergencyJobStatLabel: {
+    fontSize: 11,
+    color: '#991B1B',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  emergencyJobReason: {
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#DC2626',
+  },
+  emergencyJobReasonLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
+    marginBottom: 4,
+  },
+  emergencyJobReasonText: {
+    fontSize: 13,
+    color: '#991B1B',
+    lineHeight: 18,
+  },
+  emergencyWarning: {
+    backgroundColor: '#FEE2E2',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  emergencyWarningText: {
+    fontSize: 13,
+    color: '#991B1B',
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  // Emergency bidding styles
+  emergencyBidLabel: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#DC2626',
+    textAlign: 'center',
+  },
+  emergencyBidSubtext: {
+    fontSize: 10,
+    color: '#991B1B',
+    fontWeight: '600',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  // Emergency property details styles
+  emergencyPropertyDetails: {
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#DC2626',
+  },
+  emergencyPropertyTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
+    marginBottom: 8,
+  },
+  emergencyPropertySpecs: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  emergencyPropertySpec: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  emergencyPropertySpecText: {
+    fontSize: 10,
+    color: '#991B1B',
+    marginLeft: 4,
+    fontWeight: '600',
+  },
+  // Emergency application card styles
+  emergencyApplicationCard: {
+    borderWidth: 2,
+    borderColor: '#FEE2E2',
+    backgroundColor: '#FEF2F2',
+  },
+  emergencyApplicationStatus: {
+    backgroundColor: '#DC2626',
+  },
+  // Emergency bid message styles
+  emergencyBidMessage: {
+    backgroundColor: '#FEE2E2',
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#DC2626',
+  },
+  emergencyBidMessageLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#DC2626',
+    marginBottom: 2,
+  },
+  emergencyBidMessageText: {
+    fontSize: 11,
+    color: '#991B1B',
+    lineHeight: 14,
+  },
+  // Emergency bid status styles
+  emergencyBidButtonContainer: {
+    flexDirection: 'column',
+    gap: 8,
+  },
+  emergencyBidStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  emergencyBidStatusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 6,
+    letterSpacing: 0.5,
+  },
+  emergencyWithdrawButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  emergencyWithdrawButtonText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  // Tab navigation styles
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginHorizontal: 4,
+  },
+  activeTab: {
+    backgroundColor: '#E3F2FD',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+    marginLeft: 6,
+  },
+  activeTabText: {
+    color: '#1E88E5',
+  },
+  tabBadge: {
+    backgroundColor: '#1E88E5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 6,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  activeTabBadge: {
+    backgroundColor: '#1E88E5',
+  },
+  tabBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  activeTabBadgeText: {
+    color: 'white',
   },
 });

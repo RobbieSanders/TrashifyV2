@@ -28,7 +28,7 @@ import {
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
   import('./src/scripts/test/testIcal.js').catch(console.error);
 }
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from './src/utils/firebase';
 import { 
   geocodeAddressCrossPlatform, 
@@ -164,6 +164,7 @@ import { ProfileSettingsScreen } from './src/screens/ProfileSettingsScreen';
 import { CleeviLogo } from './components/CleeviLogo';
 import HostProfileScreen from './src/screens/HostProfileScreenModern';
 import CleanerHostProfileScreenModern from './src/screens/CleanerHostProfileScreenModern';
+import { EmergencyCleaningModal } from './src/screens/EmergencyCleaningModal';
 
 // Admin navigation stack
 function AdminStack() {
@@ -496,6 +497,7 @@ function HostHomeScreen({ navigation }: any) {
   const [pendingApprovalJobs, setPendingApprovalJobs] = useState<Job[]>([]);
   const [showCalendarView, setShowCalendarView] = useState(false);
   const [showAllServicesModal, setShowAllServicesModal] = useState(false);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const jobs = useTrashifyStore(s => s.jobs);
   const createJobLocal = useTrashifyStore(s => s.createJob);
   const setJobs = useTrashifyStore(s => s.setJobs);
@@ -1476,6 +1478,314 @@ function HostHomeScreen({ navigation }: any) {
                 )}
               </View>
 
+              {/* Emergency Bids Section */}
+              {(() => {
+                const [emergencyBids, setEmergencyBids] = useState<any[]>([]);
+                const [loadingEmergencyBids, setLoadingEmergencyBids] = useState(true);
+                
+                // Subscribe to emergency bids for this host's jobs
+                useEffect(() => {
+                  if (!user?.uid) return;
+
+                  const emergencyBidsRef = collection(db, 'emergencyBids');
+                  const emergencyBidsQuery = query(
+                    emergencyBidsRef,
+                    where('status', '==', 'pending')
+                  );
+                  
+                  const unsubscribe = onSnapshot(emergencyBidsQuery, async (snapshot) => {
+                    const bids: any[] = [];
+                    
+                    // Get all pending emergency bids
+                    for (const bidDoc of snapshot.docs) {
+                      const bidData = { id: bidDoc.id, ...bidDoc.data() } as any;
+                      
+                      // Check if this bid is for one of this host's emergency jobs
+                      if (bidData.cleaningJobId) {
+                        try {
+                          const jobDoc = await getDoc(doc(db, 'cleaningJobs', bidData.cleaningJobId));
+                          if (jobDoc.exists()) {
+                            const jobData = jobDoc.data();
+                            if (jobData.hostId === user.uid && jobData.isEmergency) {
+                              // Add job details to the bid
+                              bidData.jobDetails = jobData;
+                              bids.push(bidData);
+                            }
+                          }
+                        } catch (error) {
+                          console.error('Error fetching job details for bid:', bidData.id, error);
+                        }
+                      }
+                    }
+                    
+                    setEmergencyBids(bids);
+                    setLoadingEmergencyBids(false);
+                  }, (error) => {
+                    console.error('[HostHomeScreen] Error loading emergency bids:', error);
+                    setEmergencyBids([]);
+                    setLoadingEmergencyBids(false);
+                  });
+
+                  return () => unsubscribe();
+                }, [user?.uid]);
+
+                // Handle accepting an emergency bid
+                const handleAcceptEmergencyBid = async (bid: any) => {
+                  if (!user?.uid || !bid.cleaningJobId || !bid.cleanerId) return;
+                  
+                  Alert.alert(
+                    'Accept Emergency Bid',
+                    `Accept ${bid.cleanerName}'s bid of $${bid.flatFee} for this emergency cleaning?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Accept',
+                        style: 'default',
+                        onPress: async () => {
+                          try {
+                            // 1. Update the emergency job to assign it to the cleaner
+                            const jobRef = doc(db, 'cleaningJobs', bid.cleaningJobId);
+                            await updateDoc(jobRef, {
+                              assignedCleanerId: bid.cleanerId,
+                              assignedCleanerName: bid.cleanerName,
+                              status: 'assigned',
+                              flatFee: bid.flatFee,
+                              assignedAt: Date.now(),
+                              updatedAt: Date.now()
+                            });
+
+                            // 2. Update the accepted bid status
+                            const bidRef = doc(db, 'emergencyBids', bid.id);
+                            await updateDoc(bidRef, {
+                              status: 'accepted',
+                              acceptedAt: Date.now()
+                            });
+
+                            // 3. Reject all other bids for the same job
+                            const otherBidsQuery = query(
+                              collection(db, 'emergencyBids'),
+                              where('cleaningJobId', '==', bid.cleaningJobId),
+                              where('status', '==', 'pending')
+                            );
+                            
+                            const otherBidsSnapshot = await getDocs(otherBidsQuery);
+                            for (const otherBidDoc of otherBidsSnapshot.docs) {
+                              if (otherBidDoc.id !== bid.id) {
+                                await updateDoc(otherBidDoc.ref, {
+                                  status: 'rejected',
+                                  rejectedAt: Date.now()
+                                });
+                              }
+                            }
+
+                            Alert.alert(
+                              'Emergency Bid Accepted!',
+                              `${bid.cleanerName} has been assigned to your emergency cleaning. They will be notified immediately and the job will appear on your calendar.`
+                            );
+                          } catch (error) {
+                            console.error('Error accepting emergency bid:', error);
+                            Alert.alert('Error', 'Failed to accept emergency bid. Please try again.');
+                          }
+                        }
+                      }
+                    ]
+                  );
+                };
+
+                // Handle rejecting an emergency bid
+                const handleRejectEmergencyBid = async (bid: any) => {
+                  if (!user?.uid) return;
+                  
+                  Alert.alert(
+                    'Reject Emergency Bid',
+                    `Reject ${bid.cleanerName}'s bid of $${bid.flatFee}?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Reject',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            // Update the bid status to rejected
+                            const bidRef = doc(db, 'emergencyBids', bid.id);
+                            await updateDoc(bidRef, {
+                              status: 'rejected',
+                              rejectedAt: Date.now()
+                            });
+
+                            Alert.alert('Bid Rejected', `${bid.cleanerName}'s bid has been rejected.`);
+                          } catch (error) {
+                            console.error('Error rejecting emergency bid:', error);
+                            Alert.alert('Error', 'Failed to reject emergency bid. Please try again.');
+                          }
+                        }
+                      }
+                    ]
+                  );
+                };
+
+                return emergencyBids.length > 0 && (
+                  <View style={{ marginBottom: Platform.OS === 'web' ? 20 : 16 }}>
+                    <View style={{ 
+                      flexDirection: 'row', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center', 
+                      marginBottom: Platform.OS === 'web' ? 12 : 8,
+                      backgroundColor: '#FEF2F2',
+                      padding: 12,
+                      borderRadius: 8,
+                      borderWidth: 2,
+                      borderColor: '#FEE2E2'
+                    }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="warning" size={20} color="#DC2626" style={{ marginRight: 8 }} />
+                        <Text style={[styles.subtitle, { 
+                          fontSize: Platform.OS === 'web' ? 16 : 15, 
+                          fontWeight: '700', 
+                          marginBottom: 0,
+                          color: '#DC2626'
+                        }]}>
+                          🚨 Emergency Cleaning Bids ({emergencyBids.length})
+                        </Text>
+                      </View>
+                      <View style={{
+                        backgroundColor: '#DC2626',
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 8,
+                      }}>
+                        <Text style={{ color: 'white', fontSize: 10, fontWeight: '700' }}>
+                          {emergencyBids.length} URGENT
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    {emergencyBids.map((bid) => {
+                      const job = bid.jobDetails;
+                      const urgencyColor = job?.urgencyLevel === 'immediate' ? '#DC2626' : 
+                                         job?.urgencyLevel === 'same-day' ? '#EA580C' : '#D97706';
+                      
+                      // Extract city from address for display
+                      const getLocationDisplay = (address: string) => {
+                        if (!address) return 'Location not specified';
+                        const parts = address.split(',');
+                        if (parts.length >= 2) {
+                          return parts[1].trim();
+                        }
+                        return 'General area';
+                      };
+                      
+                      return (
+                        <View key={bid.id} style={[styles.card, { 
+                          marginBottom: Platform.OS === 'web' ? 12 : 8,
+                          borderLeftWidth: 4,
+                          borderLeftColor: urgencyColor,
+                          backgroundColor: '#FEF2F2',
+                          padding: Platform.OS === 'web' ? 12 : 10
+                        }]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <View style={{
+                              backgroundColor: urgencyColor,
+                              borderRadius: Platform.OS === 'web' ? 12 : 10,
+                              padding: Platform.OS === 'web' ? 6 : 5,
+                              marginRight: Platform.OS === 'web' ? 8 : 8
+                            }}>
+                              <Ionicons name="flash" size={Platform.OS === 'web' ? 16 : 14} color="white" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                <Text style={[styles.subtitle, { 
+                                  fontSize: Platform.OS === 'web' ? 14 : 13, 
+                                  fontWeight: '700',
+                                  color: urgencyColor,
+                                  marginRight: 8
+                                }]}>
+                                  EMERGENCY BID
+                                </Text>
+                                <Text style={[styles.subtitle, { 
+                                  fontSize: Platform.OS === 'web' ? 16 : 15, 
+                                  fontWeight: '600',
+                                  color: '#10B981'
+                                }]}>
+                                  ${bid.flatFee}
+                                </Text>
+                              </View>
+                              <Text style={[styles.subtitle, { 
+                                fontSize: Platform.OS === 'web' ? 14 : 13, 
+                                fontWeight: '600' 
+                              }]} numberOfLines={1}>
+                                {getLocationDisplay(job?.address || '')} • {bid.cleanerName}
+                              </Text>
+                              <Text style={[styles.muted, { 
+                                fontSize: Platform.OS === 'web' ? 12 : 11, 
+                                marginTop: 2,
+                                color: urgencyColor,
+                                fontWeight: '600'
+                              }]}>
+                                {job?.urgencyLevel?.toUpperCase().replace('-', ' ')} PRIORITY
+                              </Text>
+                              {bid.message && (
+                                <Text style={[styles.muted, { 
+                                  fontSize: Platform.OS === 'web' ? 11 : 10, 
+                                  marginTop: 4,
+                                  fontStyle: 'italic'
+                                }]} numberOfLines={2}>
+                                  "{bid.message}"
+                                </Text>
+                              )}
+                            </View>
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                              <TouchableOpacity
+                                onPress={() => handleAcceptEmergencyBid(bid)}
+                                style={{
+                                  backgroundColor: '#10B981',
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  borderRadius: 6,
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 4
+                                }}
+                              >
+                                <Ionicons name="checkmark" size={14} color="white" />
+                                <Text style={{ 
+                                  color: 'white', 
+                                  fontSize: Platform.OS === 'web' ? 12 : 11, 
+                                  fontWeight: '600' 
+                                }}>
+                                  Accept
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => handleRejectEmergencyBid(bid)}
+                                style={{
+                                  backgroundColor: '#EF4444',
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  borderRadius: 6,
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 4
+                                }}
+                              >
+                                <Ionicons name="close" size={14} color="white" />
+                                <Text style={{ 
+                                  color: 'white', 
+                                  fontSize: Platform.OS === 'web' ? 12 : 11, 
+                                  fontWeight: '600' 
+                                }}>
+                                  Reject
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                );
+              })()}
+
               {/* Cleaning Services Section */}
               <View style={{ marginBottom: Platform.OS === 'web' ? 20 : 16 }}>
                 <Text style={[styles.subtitle, { 
@@ -1487,7 +1797,15 @@ function HostHomeScreen({ navigation }: any) {
                   Cleaning Services ({cleaningJobs.length})
                 </Text>
                 {cleaningJobs && cleaningJobs.length > 0 ? (
-                  cleaningJobs.slice(0, Platform.OS === 'web' ? 20 : 15).map(job => (
+                  cleaningJobs
+                    .sort((a, b) => {
+                      // Sort by preferredDate for manual jobs, checkOutDate for iCal jobs
+                      const dateA = a.preferredDate || a.checkOutDate || a.createdAt;
+                      const dateB = b.preferredDate || b.checkOutDate || b.createdAt;
+                      return dateA - dateB;
+                    })
+                    .slice(0, Platform.OS === 'web' ? 20 : 15)
+                    .map(job => (
                     <TouchableOpacity 
                       key={job.id} 
                       style={[styles.card, { 
@@ -1681,9 +1999,7 @@ function HostHomeScreen({ navigation }: any) {
                 shadowRadius: 4,
                 elevation: 3,
               }}
-              onPress={() => {
-                Alert.alert('Coming Soon', 'Emergency cleaning service will be available soon!');
-              }}
+              onPress={() => setShowEmergencyModal(true)}
             >
               <Ionicons name="warning-outline" size={20} color="white" style={{ marginBottom: 4 }} />
               <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Emergency Clean</Text>
@@ -1715,8 +2031,18 @@ function HostHomeScreen({ navigation }: any) {
         </View>
         
         {/* Next Services Section */}
-        {(cleaningJobs.filter(j => j && (j.hostId === user?.uid || j.userId === user?.uid) && j.preferredDate && j.preferredDate >= Date.now()).length > 0 || 
-          myActiveJobs.length > 0) && (
+        {(() => {
+          // Get start of today (midnight) for cleaning jobs filtering
+          const startOfToday = new Date();
+          startOfToday.setHours(0, 0, 0, 0);
+          
+          const upcomingCleaningJobs = cleaningJobs.filter(j => 
+            j && (j.hostId === user?.uid || j.userId === user?.uid) && 
+            j.preferredDate && j.preferredDate >= startOfToday.getTime() &&
+            (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress')
+          );
+          
+          return (upcomingCleaningJobs.length > 0 || myActiveJobs.length > 0) && (
           <View style={{ marginBottom: 20 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <Text style={[styles.title, { fontSize: 20 }]}>Next Services</Text>
@@ -1730,7 +2056,7 @@ function HostHomeScreen({ navigation }: any) {
                 }}
               >
                 <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
-                  {cleaningJobs.length + myActiveJobs.length} upcoming
+                  {upcomingCleaningJobs.length + myActiveJobs.length} upcoming
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1815,8 +2141,12 @@ function HostHomeScreen({ navigation }: any) {
 
             {/* Get all jobs for the next date that has cleaning jobs */}
             {(() => {
+              // Get start of today (midnight) for cleaning jobs filtering
+              const startOfToday = new Date();
+              startOfToday.setHours(0, 0, 0, 0);
+              
               const upcomingJobs = cleaningJobs
-                .filter(j => j && (j.hostId === user?.uid || j.userId === user?.uid) && j.preferredDate && j.preferredDate >= Date.now() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress'))
+                .filter(j => j && j.hostId === user?.uid && j.preferredDate && j.preferredDate >= startOfToday.getTime() && (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress'))
                 .sort((a, b) => a.preferredDate - b.preferredDate);
               
               if (upcomingJobs.length === 0 && myActiveJobs.length === 0) return null;
@@ -1841,18 +2171,18 @@ function HostHomeScreen({ navigation }: any) {
 
               return (
                 <>
-                  {/* Show all jobs for the next cleaning date */}
-                  {jobsOnNextDate.map(job => (
-              <TouchableOpacity
-                key={job.id} 
-                style={[styles.card, {
-                  backgroundColor: '#F0FDFB',
-                  borderWidth: 2,
-                  borderColor: '#10B981',
-                  marginBottom: 12
-                }]}
-                onPress={() => navigation.navigate('CleaningDetail', { cleaningJobId: job.id })}
-              >
+              {/* Show all jobs for the next cleaning date */}
+              {jobsOnNextDate.map(job => (
+        <TouchableOpacity
+          key={job.id} 
+          style={[styles.card, {
+            backgroundColor: (job as any).isEmergency ? '#FEF2F2' : '#F0FDFB',
+            borderWidth: 2,
+            borderColor: (job as any).isEmergency ? '#DC2626' : '#10B981',
+            marginBottom: 12
+          }]}
+          onPress={() => navigation.navigate('CleaningDetail', { cleaningJobId: job.id })}
+        >
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                   <View style={{
                     backgroundColor: '#10B981',
@@ -1865,30 +2195,36 @@ function HostHomeScreen({ navigation }: any) {
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
                       <View style={{
-                        backgroundColor: '#F0FDFB',
+                        backgroundColor: (job as any).isEmergency ? '#FEE2E2' : '#F0FDFB',
                         paddingHorizontal: 6,
                         paddingVertical: 2,
                         borderRadius: 8,
                         marginRight: 6,
                         borderWidth: 1,
-                        borderColor: '#10B981',
+                        borderColor: (job as any).isEmergency ? '#DC2626' : '#10B981',
                       }}>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#10B981' }}>
-                          Cleaning
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: (job as any).isEmergency ? '#DC2626' : '#10B981' }}>
+                          {(job as any).isEmergency ? 'EMERGENCY CLEAN' : job.cleaningType ? `${job.cleaningType.charAt(0).toUpperCase() + job.cleaningType.slice(1)} Clean` : 'Cleaning'}
                         </Text>
                       </View>
                       <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600', flex: 1 }]}>
                         {job.property?.label || job.address || 'Property'}
                       </Text>
                     </View>
-                    {job.checkOutDate && (
+                    {/* Show different info for manual cleans vs iCal reservations */}
+                    {job.cleaningType && !job.checkOutDate ? (
+                      <Text style={[styles.muted, { fontSize: 12, marginTop: 2 }]}>
+                        Scheduled: {new Date(job.preferredDate).toLocaleDateString()} at {job.preferredTime}
+                      </Text>
+                    ) : job.checkOutDate ? (
                       <Text style={[styles.muted, { fontSize: 12, marginTop: 2 }]}>
                         After checkout: {new Date(job.checkOutDate).toLocaleDateString()}
                       </Text>
-                    )}
+                    ) : null}
                   </View>
                 </View>
                 
+                {/* Only show guest info for iCal reservations */}
                 {job.guestName && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                     <Ionicons name="person-outline" size={14} color="#64748B" style={{ marginRight: 6 }} />
@@ -1898,6 +2234,7 @@ function HostHomeScreen({ navigation }: any) {
                   </View>
                 )}
                 
+                {/* Only show stay info for iCal reservations */}
                 {job.checkInDate && job.checkOutDate && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                     <Ionicons name="calendar-outline" size={14} color="#64748B" style={{ marginRight: 6 }} />
@@ -2032,15 +2369,15 @@ function HostHomeScreen({ navigation }: any) {
                         </TouchableOpacity>
                       ))}
                       
-                      {/* Show remaining cleaning services */}
-                      {remainingJobs.slice(0, 3).map(job => (
+                      {/* Show remaining cleaning services - sorted by date */}
+                      {remainingJobs.slice(0, 3).sort((a, b) => a.preferredDate - b.preferredDate).map(job => (
                         <TouchableOpacity
                           key={job.id} 
                           style={[styles.card, { 
                             marginBottom: 8,
                             paddingVertical: 10,
                             borderLeftWidth: 3,
-                            borderLeftColor: '#10B981'
+                            borderLeftColor: (job as any).isEmergency ? '#DC2626' : '#10B981'
                           }]}
                           onPress={() => navigation.navigate('CleaningDetail', { cleaningJobId: job.id })}
                         >
@@ -2048,16 +2385,16 @@ function HostHomeScreen({ navigation }: any) {
                             <View>
                               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                 <View style={{
-                                  backgroundColor: '#F0FDFB',
+                                  backgroundColor: (job as any).isEmergency ? '#FEE2E2' : '#F0FDFB',
                                   paddingHorizontal: 5,
                                   paddingVertical: 1,
                                   borderRadius: 6,
                                   marginRight: 4,
                                   borderWidth: 1,
-                                  borderColor: '#10B981',
+                                  borderColor: (job as any).isEmergency ? '#DC2626' : '#10B981',
                                 }}>
-                                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#10B981' }}>
-                                    Cleaning
+                                  <Text style={{ fontSize: 10, fontWeight: '600', color: (job as any).isEmergency ? '#DC2626' : '#10B981' }}>
+                                    {(job as any).isEmergency ? 'EMERGENCY' : 'Cleaning'}
                                   </Text>
                                 </View>
                                 <Text style={[styles.subtitle, { fontSize: 14 }]}>
@@ -2071,15 +2408,15 @@ function HostHomeScreen({ navigation }: any) {
                               )}
                             </View>
                             {(job.assignedCleanerName || job.assignedCleanerId || job.cleanerFirstName) ? (
-                              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                              <Ionicons name="checkmark-circle" size={16} color={(job as any).isEmergency ? '#DC2626' : '#10B981'} />
                             ) : (
                               <View style={{
-                                backgroundColor: '#FEF3C7',
+                                backgroundColor: (job as any).isEmergency ? '#FEE2E2' : '#FEF3C7',
                                 paddingHorizontal: 8,
                                 paddingVertical: 3,
                                 borderRadius: 8,
                               }}>
-                                <Text style={{ fontSize: 10, color: '#92400E', fontWeight: '600' }}>
+                                <Text style={{ fontSize: 10, color: (job as any).isEmergency ? '#DC2626' : '#92400E', fontWeight: '600' }}>
                                   Needs cleaner
                                 </Text>
                               </View>
@@ -2093,9 +2430,17 @@ function HostHomeScreen({ navigation }: any) {
               );
             })()}
           </View>
-        )}
+          );
+        })()}
 
       </ScrollView>
+
+      {/* Emergency Cleaning Modal */}
+      <EmergencyCleaningModal
+        visible={showEmergencyModal}
+        onClose={() => setShowEmergencyModal(false)}
+        navigation={navigation}
+      />
     </>
   );
 }

@@ -1581,6 +1581,152 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
               )}
             </View>
             
+            {/* Next Services Section */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Next Services</Text>
+              {(() => {
+                const today = new Date();
+                const nextWeek = new Date();
+                nextWeek.setDate(today.getDate() + 7);
+                
+                const nextServices = assignedJobs.filter(job => {
+                  if (!job.preferredDate) return false;
+                  const jobDate = new Date(job.preferredDate);
+                  return jobDate >= today && jobDate <= nextWeek && 
+                         (job.status === 'assigned' || job.status === 'in_progress' || job.status === 'scheduled');
+                }).sort((a, b) => (a.preferredDate || 0) - (b.preferredDate || 0));
+
+                if (nextServices.length === 0) {
+                  return (
+                    <View style={styles.emptyState}>
+                      <View style={styles.emptyIcon}>
+                        <Ionicons name="calendar-outline" size={40} color="#999" />
+                      </View>
+                      <Text style={styles.emptyText}>No services in the next 7 days</Text>
+                      <Text style={styles.emptySubtext}>Upcoming assignments will appear here</Text>
+                    </View>
+                  );
+                }
+
+                return nextServices.slice(0, 3).map((job) => (
+                  <View key={job.id} style={[
+                    styles.propertyCard, 
+                    job.isEmergency && { 
+                      borderColor: '#DC2626', 
+                      borderWidth: 2, 
+                      backgroundColor: '#FEF2F2',
+                      shadowColor: '#DC2626',
+                      shadowOpacity: 0.15,
+                      shadowRadius: 8,
+                      elevation: 6
+                    }
+                  ]}>
+                    <View style={styles.propertyHeader}>
+                      <View style={styles.propertyInfo}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                          {job.isEmergency && (
+                            <View style={[styles.closeButton, { backgroundColor: '#DC2626', marginRight: 8, width: 24, height: 24 }]}>
+                              <Ionicons name="flash" size={12} color="white" />
+                            </View>
+                          )}
+                          <Text style={[styles.propertyLabel, job.isEmergency && { color: '#DC2626', fontWeight: '700' }]}>
+                            {job.isEmergency ? 'EMERGENCY CLEANING' : 'Cleaning Service'}
+                          </Text>
+                        </View>
+                        <Text style={[styles.propertyAddress, job.isEmergency && { color: '#991B1B' }]}>{job.address}</Text>
+                        <Text style={[styles.propertyAddress, { 
+                          fontSize: 12, 
+                          color: job.isEmergency ? '#991B1B' : '#10B981', 
+                          fontWeight: '600' 
+                        }]}>
+                          {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'No date'} at {job.preferredTime || '10:00 AM'}
+                        </Text>
+                        {job.isEmergency && job.emergencyReason && (
+                          <Text style={[styles.propertyAddress, { fontSize: 11, color: '#991B1B', fontStyle: 'italic' }]}>
+                            Emergency: {job.emergencyReason}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={[styles.closeButton, { 
+                        backgroundColor: job.isEmergency ? '#DC2626' :
+                                       job.status === 'assigned' ? '#10B981' : 
+                                       job.status === 'in_progress' ? '#F59E0B' : '#64748B',
+                        width: 32,
+                        height: 32
+                      }]}>
+                        <Ionicons 
+                          name={job.isEmergency ? 'flash' :
+                               job.status === 'assigned' ? 'checkmark' : 
+                               job.status === 'in_progress' ? 'time' : 'calendar'} 
+                          size={16} 
+                          color="white" 
+                        />
+                      </View>
+                    </View>
+                  </View>
+                ));
+              })()}
+            </View>
+
+            {/* Other Upcoming Services Section */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Other Upcoming Services</Text>
+              {(() => {
+                const nextWeek = new Date();
+                nextWeek.setDate(nextWeek.getDate() + 7);
+                const nextMonth = new Date();
+                nextMonth.setDate(nextMonth.getDate() + 30);
+                
+                const otherServices = assignedJobs.filter(job => {
+                  if (!job.preferredDate) return false;
+                  const jobDate = new Date(job.preferredDate);
+                  return jobDate > nextWeek && jobDate <= nextMonth && 
+                         (job.status === 'assigned' || job.status === 'in_progress' || job.status === 'scheduled');
+                }).sort((a, b) => (a.preferredDate || 0) - (b.preferredDate || 0));
+
+                if (otherServices.length === 0) {
+                  return (
+                    <View style={styles.emptyState}>
+                      <View style={styles.emptyIcon}>
+                        <Ionicons name="calendar-outline" size={40} color="#999" />
+                      </View>
+                      <Text style={styles.emptyText}>No other upcoming services</Text>
+                      <Text style={styles.emptySubtext}>Services beyond next week will appear here</Text>
+                    </View>
+                  );
+                }
+
+                return otherServices.slice(0, 5).map((job) => (
+                  <View key={job.id} style={[styles.propertyCard, { marginBottom: 8, padding: 12 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={[styles.closeButton, { 
+                        backgroundColor: job.isEmergency ? '#DC2626' : '#64748B',
+                        marginRight: 12,
+                        width: 24,
+                        height: 24
+                      }]}>
+                        <Ionicons name={job.isEmergency ? "flash" : "calendar"} size={12} color="white" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.propertyLabel, { fontSize: 14 }]}>{job.address}</Text>
+                        <Text style={[styles.propertyAddress, { fontSize: 12 }]}>
+                          {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'No date'} at {job.preferredTime || '10:00 AM'}
+                        </Text>
+                        {job.isEmergency && (
+                          <Text style={[styles.propertyAddress, { fontSize: 11, color: '#DC2626', fontWeight: '600' }]}>
+                            EMERGENCY CLEANING
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[styles.propertyAddress, { fontSize: 11, color: '#64748B' }]}>
+                        {job.status.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                ));
+              })()}
+            </View>
+
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Recent Activity</Text>
               <Text style={{ color: '#666', fontSize: 14 }}>

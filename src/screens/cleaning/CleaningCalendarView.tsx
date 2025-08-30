@@ -93,6 +93,7 @@ const CleaningCalendarView: React.FC = () => {
     const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
     const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
 
+    // Query for all cleaning jobs in the date range, including emergency jobs
     const q = query(
       collection(db, 'cleaningJobs'),
       where('preferredDate', '>=', startOfMonth.getTime()),
@@ -108,8 +109,32 @@ const CleaningCalendarView: React.FC = () => {
           ...doc.data()
         })) as CleaningJob[];
 
-        setCleaningJobs(jobs);
-        setCalendarDays(generateCalendarDays(currentDate, jobs));
+        // Filter to include all relevant jobs (regular, manual, and emergency)
+        const filteredJobs = jobs.filter(job => {
+          // Include all jobs that have a valid date and are not cancelled
+          if (!job.preferredDate) return false;
+          if (job.status === 'cancelled') return false;
+          
+          // Include regular jobs, manual jobs, and emergency jobs
+          return true;
+        });
+
+        // Debug: Log emergency jobs to see if they're being loaded
+        const emergencyJobs = filteredJobs.filter(job => job.isEmergency);
+        if (emergencyJobs.length > 0) {
+          console.log('[CleaningCalendarView] Found emergency jobs:', emergencyJobs.map(j => ({
+            id: j.id,
+            address: j.address,
+            preferredDate: j.preferredDate,
+            status: j.status,
+            isEmergency: j.isEmergency,
+            cleaningType: j.cleaningType,
+            assignedCleanerId: j.assignedCleanerId
+          })));
+        }
+
+        setCleaningJobs(filteredJobs);
+        setCalendarDays(generateCalendarDays(currentDate, filteredJobs));
         setLoading(false);
         setRefreshing(false);
       },
@@ -334,16 +359,32 @@ const CleaningCalendarView: React.FC = () => {
           cleaningJobs.map((cleaning) => (
             <TouchableOpacity
               key={cleaning.id}
-              style={styles.cleaningCard}
+              style={[
+                styles.cleaningCard,
+                (cleaning as any).isEmergency && styles.emergencyCleaningCard
+              ]}
               onPress={() => handleCleaningPress(cleaning)}
             >
               <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(cleaning.status) }]} />
               <View style={styles.cleaningCardContent}>
-                <Text style={styles.cleaningAddress} numberOfLines={1}>
-                  {cleaning.address}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
+                  {(cleaning as any).isEmergency && (
+                    <View style={styles.emergencyCardIcon}>
+                      <Ionicons name="flash" size={12} color="#DC2626" />
+                    </View>
+                  )}
+                  <Text style={[
+                    styles.cleaningAddress,
+                    (cleaning as any).isEmergency && { color: '#DC2626', fontWeight: '700' }
+                  ]} numberOfLines={1}>
+                    {(cleaning as any).isEmergency ? 'EMERGENCY: ' : ''}{cleaning.address}
+                  </Text>
+                </View>
                 <View style={styles.cleaningCardDetails}>
-                  <Text style={styles.cleaningDate}>
+                  <Text style={[
+                    styles.cleaningDate,
+                    (cleaning as any).isEmergency && { color: '#991B1B', fontWeight: '600' }
+                  ]}>
                     {new Date(cleaning.preferredDate!).toLocaleDateString()} at {cleaning.preferredTime || '10:00 AM'}
                   </Text>
                   <Text style={styles.cleanerAssigned}>
@@ -354,6 +395,11 @@ const CleaningCalendarView: React.FC = () => {
                   {cleaning.guestName && (
                     <Text style={styles.guestInfo}>
                       Guest: {cleaning.guestName}
+                    </Text>
+                  )}
+                  {(cleaning as any).isEmergency && (cleaning as any).emergencyReason && (
+                    <Text style={styles.emergencyReasonInCard}>
+                      Emergency: {(cleaning as any).emergencyReason}
                     </Text>
                   )}
                 </View>
@@ -840,6 +886,32 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  // Emergency cleaning card styles
+  emergencyCleaningCard: {
+    borderColor: '#DC2626',
+    borderWidth: 2,
+    backgroundColor: '#FEF2F2',
+    shadowColor: '#DC2626',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  emergencyCardIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  emergencyReasonInCard: {
+    fontSize: 12,
+    color: '#991B1B',
+    fontStyle: 'italic',
+    marginTop: 2,
+    fontWeight: '500',
   },
 });
 
