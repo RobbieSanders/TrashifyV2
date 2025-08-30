@@ -9,11 +9,13 @@ import {
   Alert,
   TextInput,
   ActivityIndicator,
-  FlatList
+  FlatList,
+  RefreshControl,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../stores/authStore';
-import { TeamMember } from '../../utils/types';
+import { TeamMember, CleaningJob } from '../../utils/types';
 import { 
   doc, 
   updateDoc, 
@@ -24,10 +26,21 @@ import {
   query,
   where,
   getDocs,
-  getDoc
+  getDoc,
+  orderBy
 } from 'firebase/firestore';
 import { db } from '../../utils/firebase';
 import { useAccountsStore } from '../../stores/accountsStore';
+
+interface CalendarDay {
+  date: Date;
+  day: number;
+  month: number;
+  year: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  cleanings: CleaningJob[];
+}
 
 export function MyTeamsScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
@@ -47,12 +60,106 @@ export function MyTeamsScreen({ navigation }: any) {
   const { properties, loadProperties } = useAccountsStore();
   const [memberProperties, setMemberProperties] = useState<{ [propertyId: string]: boolean }>({});
 
+  // Calendar view state
+  const [showCalendarView, setShowCalendarView] = useState(false);
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+  const [cleaningJobs, setCleaningJobs] = useState<CleaningJob[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<CalendarDay | null>(null);
+  const [showDayModal, setShowDayModal] = useState(false);
+  const [showJobSelectionModal, setShowJobSelectionModal] = useState(false);
+  const [selectedDayJobs, setSelectedDayJobs] = useState<CleaningJob[]>([]);
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
   // Load properties on mount
   useEffect(() => {
     if (user?.uid) {
       loadProperties(user.uid);
     }
   }, [user?.uid]);
+
+  // Generate calendar days for the current month
+  const generateCalendarDays = (date: Date, jobs: CleaningJob[]) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDate = new Date(firstDay);
+    startDate.setDate(startDate.getDate() - firstDay.getDay());
+
+    const days: CalendarDay[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let i = 0; i < 42; i++) {
+      const dayDate = new Date(startDate);
+      dayDate.setDate(startDate.getDate() + i);
+      dayDate.setHours(0, 0, 0, 0);
+
+      // Find cleanings for this day
+      const dayCleanings = jobs.filter(job => {
+        if (!job.preferredDate) return false;
+        const jobDate = new Date(job.preferredDate);
+        jobDate.setHours(0, 0, 0, 0);
+        return jobDate.getTime() === dayDate.getTime();
+      });
+
+      days.push({
+        date: dayDate,
+        day: dayDate.getDate(),
+        month: dayDate.getMonth(),
+        year: dayDate.getFullYear(),
+        isCurrentMonth: dayDate.getMonth() === month,
+        isToday: dayDate.getTime() === today.getTime(),
+        cleanings: dayCleanings
+      });
+    }
+
+    return days;
+  };
+
+  // Load cleaning jobs for calendar view
+  useEffect(() => {
+    if (!showCalendarView || !user?.uid) return;
+
+    const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59);
+
+    const q = query(
+      collection(db, 'cleaningJobs'),
+      where('userId', '==', user.uid),
+      where('preferredDate', '>=', startOfMonth.getTime()),
+      where('preferredDate', '<=', endOfMonth.getTime()),
+      orderBy('preferredDate', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const jobs = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as CleaningJob[];
+
+        setCleaningJobs(jobs);
+        setCalendarDays(generateCalendarDays(currentDate, jobs));
+        setRefreshing(false);
+      },
+      (error) => {
+        console.error('Error loading cleaning jobs:', error);
+        setRefreshing(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentDate, showCalendarView, user?.uid]);
 
   // Subscribe to team members from subcollection
   useEffect(() => {
@@ -646,6 +753,72 @@ export function MyTeamsScreen({ navigation }: any) {
     return property.label || property.address;
   };
   
+  // Calendar navigation functions
+  const navigateToPreviousMonth = () => {
+    const newDate = new Date(currentDate);
+    newDate.setMonth(newDate.getMonth() - 1);
+    setCurrentDate(newDate);
+  };
+
+  const navigateToNextMonth = () => {
+    const newDate = new Date(currentDate);
+    newDate.setMonth(newDate.getMonth() + 1);
+    setCurrentDate(newDate);
+  };
+
+  const navigateToToday = () => {
+    setCurrentDate(new Date());
+  };
+
+  // Handle day press in calendar
+  const handleDayPress = (day: CalendarDay) => {
+    if (day.cleanings.length === 0) {
+      Alert.alert('No Jobs', 'No cleaning jobs scheduled for this date.');
+      return;
+    }
+
+    if (day.cleanings.length === 1) {
+      // Single job - start it directly
+      handleStartJob(day.cleanings[0]);
+    } else {
+      // Multiple jobs - show selection modal
+      setSelectedDayJobs(day.cleanings);
+      setShowJobSelectionModal(true);
+    }
+  };
+
+  // Handle starting a job
+  const handleStartJob = async (job: CleaningJob) => {
+    try {
+      const jobRef = doc(db, 'cleaningJobs', job.id);
+      await updateDoc(jobRef, { 
+        status: 'in_progress',
+        startedAt: Date.now()
+      });
+      Alert.alert('Success', 'Job started! You can now begin cleaning.');
+    } catch (error) {
+      console.error('Error starting job:', error);
+      Alert.alert('Error', 'Failed to start job. Please try again.');
+    }
+  };
+
+  // Get status color for jobs
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'open': return '#FFB74D';
+      case 'assigned': return '#64B5F6';
+      case 'in_progress': return '#4FC3F7';
+      case 'completed': return '#66BB6A';
+      case 'cancelled': return '#E57373';
+      default: return '#9E9E9E';
+    }
+  };
+
+  // Refresh calendar
+  const onRefresh = () => {
+    setRefreshing(true);
+  };
+
   // Filter out orphaned property IDs
   const getValidPropertyIds = (propertyIds: string[] | undefined) => {
     if (!propertyIds) return [];
@@ -660,19 +833,183 @@ export function MyTeamsScreen({ navigation }: any) {
   const secondaryCleaners = teamMembers.filter(m => m.role === 'secondary_cleaner');
   const trashServices = teamMembers.filter(m => m.role === 'trash_service');
 
+  // Render calendar view
+  const renderCalendarView = () => (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
+      {/* Calendar Header */}
+      <View style={styles.calendarHeader}>
+        <TouchableOpacity onPress={navigateToPreviousMonth} style={styles.navButton}>
+          <Ionicons name="chevron-back" size={24} color="white" />
+        </TouchableOpacity>
+        
+        <View style={styles.headerCenter}>
+          <Text style={styles.monthYear}>
+            {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
+          </Text>
+          <TouchableOpacity onPress={navigateToToday}>
+            <Text style={styles.todayButton}>Today</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity onPress={navigateToNextMonth} style={styles.navButton}>
+          <Ionicons name="chevron-forward" size={24} color="white" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Day Names */}
+      <View style={styles.dayNamesContainer}>
+        {dayNames.map((dayName, index) => (
+          <View key={index} style={styles.dayNameCell}>
+            <Text style={styles.dayNameText}>{dayName}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Calendar Grid */}
+      <View style={styles.calendarGrid}>
+        {calendarDays.map((day, index) => (
+          <TouchableOpacity
+            key={index}
+            style={[
+              styles.dayCell,
+              !day.isCurrentMonth && styles.otherMonthDay,
+              day.isToday && styles.todayCell
+            ]}
+            onPress={() => handleDayPress(day)}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.dayNumber,
+              !day.isCurrentMonth && styles.otherMonthDayNumber,
+              day.isToday && styles.todayNumber
+            ]}>
+              {day.day}
+            </Text>
+            
+            {day.cleanings.length > 0 && (
+              <View style={styles.cleaningInfo}>
+                <View style={styles.cleaningIndicators}>
+                  {day.cleanings.slice(0, 2).map((cleaning, idx) => (
+                    <View
+                      key={idx}
+                      style={[
+                        styles.cleaningDot,
+                        { backgroundColor: getStatusColor(cleaning.status) }
+                      ]}
+                    />
+                  ))}
+                  {day.cleanings.length > 2 && (
+                    <Text style={styles.moreIndicator}>+{day.cleanings.length - 2}</Text>
+                  )}
+                </View>
+                
+                {day.cleanings.length === 1 && (
+                  <>
+                    <Text style={styles.cleaningTime} numberOfLines={1}>
+                      {day.cleanings[0].preferredTime || '10:00 AM'}
+                    </Text>
+                    <Text style={styles.cleanerName} numberOfLines={1}>
+                      {(day.cleanings[0].assignedCleanerName || day.cleanings[0].cleanerFirstName) ? 
+                        (day.cleanings[0].assignedCleanerName || `${day.cleanings[0].cleanerFirstName}`) : 
+                        'Unassigned'}
+                    </Text>
+                  </>
+                )}
+                
+                {day.cleanings.length > 1 && (
+                  <Text style={styles.multipleCleanings}>
+                    {day.cleanings.length} jobs
+                  </Text>
+                )}
+              </View>
+            )}
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Upcoming Jobs List */}
+      <View style={styles.upcomingSection}>
+        <Text style={styles.upcomingSectionTitle}>Upcoming Jobs</Text>
+        {cleaningJobs.length === 0 ? (
+          <Text style={styles.noJobsText}>No jobs scheduled this month</Text>
+        ) : (
+          cleaningJobs.map((job) => (
+            <TouchableOpacity
+              key={job.id}
+              style={styles.jobCard}
+              onPress={() => handleStartJob(job)}
+            >
+              <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(job.status) }]} />
+              <View style={styles.jobCardContent}>
+                <Text style={styles.jobAddress} numberOfLines={1}>
+                  {job.address}
+                </Text>
+                <View style={styles.jobCardDetails}>
+                  <Text style={styles.jobDate}>
+                    {new Date(job.preferredDate!).toLocaleDateString()} at {job.preferredTime || '10:00 AM'}
+                  </Text>
+                  <Text style={styles.cleanerAssigned}>
+                    {(job.assignedCleanerName || (job.cleanerFirstName && job.cleanerLastName))
+                      ? (job.assignedCleanerName || `${job.cleanerFirstName} ${job.cleanerLastName}`)
+                      : 'No cleaner assigned'}
+                  </Text>
+                  {job.guestName && (
+                    <Text style={styles.guestInfo}>
+                      Guest: {job.guestName}
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.jobCardFooter}>
+                  <Text style={styles.jobType}>{job.cleaningType || 'Standard'}</Text>
+                  <Text style={[styles.statusBadge, { color: getStatusColor(job.status) }]}>
+                    {job.status.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))
+        )}
+      </View>
+    </ScrollView>
+  );
+
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={styles.title}>My Team</Text>
+      {/* Header with view toggle */}
+      <View style={styles.header}>
+        <Text style={styles.title}>My Team</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            style={[styles.viewToggle, showCalendarView && styles.viewToggleActive]}
+            onPress={() => setShowCalendarView(!showCalendarView)}
+          >
+            <Ionicons 
+              name={showCalendarView ? "list" : "calendar"} 
+              size={20} 
+              color={showCalendarView ? "white" : "#1E88E5"} 
+            />
+            <Text style={[styles.viewToggleText, showCalendarView && styles.viewToggleTextActive]}>
+              {showCalendarView ? "List View" : "Calendar"}
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity 
             style={styles.addButton}
             onPress={() => setShowAddMemberModal(true)}
           >
-            <Ionicons name="person-add" size={24} color="white" />
+            <Ionicons name="person-add" size={20} color="white" />
             <Text style={styles.addButtonText}>Add Member</Text>
           </TouchableOpacity>
         </View>
+      </View>
+
+      {showCalendarView ? renderCalendarView() : (
+        <ScrollView showsVerticalScrollIndicator={false}>
 
         {/* Primary Cleaners Section */}
         <View style={styles.section}>
@@ -889,13 +1226,72 @@ export function MyTeamsScreen({ navigation }: any) {
           )}
         </View>
         
-        <View style={styles.tipContainer}>
-          <Ionicons name="information-circle" size={20} color="#64748B" />
-          <Text style={styles.tipText}>
-            Tap cleaner names to assign properties. Tap role icons to switch between Primary and Secondary.
-          </Text>
+          <View style={styles.tipContainer}>
+            <Ionicons name="information-circle" size={20} color="#64748B" />
+            <Text style={styles.tipText}>
+              Tap cleaner names to assign properties. Tap role icons to switch between Primary and Secondary. Use Calendar view to see and start cleaning jobs.
+            </Text>
+          </View>
+        </ScrollView>
+      )}
+
+      {/* Job Selection Modal for multiple jobs on same day */}
+      <Modal
+        visible={showJobSelectionModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowJobSelectionModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Job to Start</Text>
+              <TouchableOpacity onPress={() => setShowJobSelectionModal(false)}>
+                <Ionicons name="close" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.jobSelectionList}>
+              {selectedDayJobs.map((job) => (
+                <TouchableOpacity
+                  key={job.id}
+                  style={styles.jobSelectionItem}
+                  onPress={() => {
+                    setShowJobSelectionModal(false);
+                    handleStartJob(job);
+                  }}
+                >
+                  <View style={[styles.jobStatusIndicator, { backgroundColor: getStatusColor(job.status) }]} />
+                  <View style={styles.jobSelectionContent}>
+                    <Text style={styles.jobSelectionAddress}>
+                      {job.address}
+                    </Text>
+                    <Text style={styles.jobSelectionTime}>
+                      {job.preferredTime || '10:00 AM'}
+                    </Text>
+                    <Text style={styles.jobSelectionCleaner}>
+                      Cleaner: {(job.assignedCleanerName || (job.cleanerFirstName && job.cleanerLastName))
+                        ? (job.assignedCleanerName || `${job.cleanerFirstName} ${job.cleanerLastName}`)
+                        : 'Not assigned'}
+                    </Text>
+                    {job.guestName && (
+                      <Text style={styles.jobSelectionGuest}>
+                        Guest: {job.guestName}
+                      </Text>
+                    )}
+                    <View style={styles.jobSelectionStatus}>
+                      <Text style={[styles.jobSelectionStatusText, { color: getStatusColor(job.status) }]}>
+                        {job.status.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#CBD5E1" />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
         </View>
-      </ScrollView>
+      </Modal>
 
       {/* Property Assignment Modal */}
       <Modal
@@ -1077,6 +1473,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F3F4F6',
   },
+  scrollContent: {
+    paddingBottom: Platform.OS === 'ios' ? 90 : 80,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1089,18 +1488,337 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0F172A',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  viewToggle: {
+    backgroundColor: '#E3F2FD',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1E88E5',
+  },
+  viewToggleActive: {
+    backgroundColor: '#1E88E5',
+  },
+  viewToggleText: {
+    color: '#1E88E5',
+    fontWeight: '600',
+    marginLeft: 4,
+    fontSize: 12,
+  },
+  viewToggleTextActive: {
+    color: 'white',
+  },
   addButton: {
     backgroundColor: '#1E88E5',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 8,
   },
   addButtonText: {
     color: 'white',
     fontWeight: '600',
-    marginLeft: 6,
+    marginLeft: 4,
+    fontSize: 12,
+  },
+  // Calendar styles
+  calendarHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1E88E5',
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    shadowColor: '#1E88E5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  headerCenter: {
+    alignItems: 'center'
+  },
+  monthYear: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: 'white',
+    letterSpacing: 0.5,
+  },
+  todayButton: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 13,
+    marginTop: 6,
+    fontWeight: '600',
+    textDecorationLine: 'underline'
+  },
+  navButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dayNamesContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  dayNameCell: {
+    flex: 1,
+    alignItems: 'center'
+  },
+  dayNameText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  dayCell: {
+    width: '14.28%',
+    height: Platform.OS === 'web' ? 42 : 38,
+    borderWidth: 0,
+    padding: 3,
+    backgroundColor: 'white',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+  },
+  otherMonthDay: {
+    backgroundColor: '#F8FAFC'
+  },
+  todayCell: {
+    backgroundColor: '#E0F2FE'
+  },
+  dayNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A'
+  },
+  otherMonthDayNumber: {
+    color: '#CBD5E1'
+  },
+  todayNumber: {
+    fontWeight: '700',
+    color: '#0369A1'
+  },
+  cleaningInfo: {
+    marginTop: 2,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-start'
+  },
+  cleaningIndicators: {
+    flexDirection: 'row',
+    marginBottom: 1,
+    justifyContent: 'center'
+  },
+  cleaningDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 0.5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  moreIndicator: {
+    fontSize: 7,
+    color: '#1E88E5',
+    marginLeft: 1,
+    fontWeight: '700'
+  },
+  cleaningTime: {
+    fontSize: 7,
+    color: '#1E88E5',
+    fontWeight: '700',
+    marginTop: 0.5,
+    textAlign: 'center'
+  },
+  cleanerName: {
+    fontSize: 6,
+    color: '#64748B',
+    marginTop: 0.5,
+    fontWeight: '600',
+    textAlign: 'center'
+  },
+  multipleCleanings: {
+    fontSize: 7,
+    color: '#F59E0B',
+    fontWeight: '700',
+    marginTop: 1,
+    textAlign: 'center'
+  },
+  upcomingSection: {
+    backgroundColor: '#FFFFFF',
+    marginTop: 24,
+    marginHorizontal: 16,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  upcomingSectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 16,
+    letterSpacing: 0.3,
+  },
+  noJobsText: {
+    fontSize: 15,
+    color: '#94A3B8',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 24
+  },
+  jobCard: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginBottom: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  statusIndicator: {
+    width: 4,
+    marginRight: 12,
+    borderRadius: 2
+  },
+  jobCardContent: {
+    flex: 1
+  },
+  jobAddress: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 5
+  },
+  jobCardDetails: {
+    marginBottom: 5
+  },
+  jobDate: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2
+  },
+  cleanerAssigned: {
+    fontSize: 14,
+    color: '#4ECDC4',
+    fontWeight: '500'
+  },
+  guestInfo: {
+    fontSize: 13,
+    color: '#888',
+    marginTop: 2,
+    fontStyle: 'italic'
+  },
+  jobCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  jobType: {
+    fontSize: 12,
+    color: '#999',
+    textTransform: 'capitalize'
+  },
+  // Job selection modal styles
+  jobSelectionList: {
+    maxHeight: 300,
+  },
+  jobSelectionItem: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    marginBottom: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  jobStatusIndicator: {
+    width: 4,
+    marginRight: 12,
+    borderRadius: 2,
+  },
+  jobSelectionContent: {
+    flex: 1,
+  },
+  jobSelectionAddress: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0F172A',
+    marginBottom: 8,
+  },
+  jobSelectionTime: {
+    fontSize: 14,
+    color: '#1E88E5',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  jobSelectionCleaner: {
+    fontSize: 14,
+    color: '#64748B',
+    marginBottom: 4,
+  },
+  jobSelectionGuest: {
+    fontSize: 13,
+    color: '#64748B',
+    fontStyle: 'italic',
+    marginBottom: 8,
+  },
+  jobSelectionStatus: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  jobSelectionStatusText: {
+    fontSize: 11,
+    color: '#1E88E5',
+    fontWeight: '600',
   },
   section: {
     marginBottom: 24,
