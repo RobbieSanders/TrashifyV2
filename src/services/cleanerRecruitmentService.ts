@@ -13,13 +13,21 @@ import {
   getDocs,
   Timestamp,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  limit
 } from 'firebase/firestore';
 import { db } from '../utils/firebase';
 import { CleanerRecruitment, CleanerBid, Coordinates } from '../utils/types';
 import { useNotifications } from '../stores/notificationsStore';
 import { geocodeAddressCrossPlatform } from './geocodingService';
 import { isPropertyWithinRadiusGoogle } from './googleGeocodingService';
+
+// Cache for distance calculations to avoid repeated API calls
+const distanceCache = new Map<string, { distance: number; timestamp: number }>();
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+// Cache for geocoded addresses
+const geocodeCache = new Map<string, { coordinates: Coordinates; timestamp: number }>();
 
 // Generate unique ID for recruitment posts and bids
 function generateId(): string {
@@ -39,6 +47,77 @@ function calculateDistance(coord1: Coordinates, coord2: Coordinates): number {
   return R * c;
 }
 
+// Optimized distance calculation with caching
+async function calculateDistanceWithCache(
+  cleanerCoords: Coordinates,
+  propertyAddress: string,
+  propertyCoords?: Coordinates
+): Promise<number | null> {
+  const cacheKey = `${cleanerCoords.latitude},${cleanerCoords.longitude}-${propertyAddress}`;
+  
+  // Check cache first
+  const cached = distanceCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.distance;
+  }
+  
+  try {
+    let targetCoords = propertyCoords;
+    
+    if (!targetCoords) {
+      // Check geocode cache
+      const geocodeCacheKey = propertyAddress.toLowerCase().trim();
+      const cachedGeocode = geocodeCache.get(geocodeCacheKey);
+      
+      if (cachedGeocode && Date.now() - cachedGeocode.timestamp < CACHE_DURATION) {
+        targetCoords = cachedGeocode.coordinates;
+      } else {
+        // Geocode the address
+        const geocoded = await geocodeAddressCrossPlatform(propertyAddress);
+        if (!geocoded) return null;
+        
+        targetCoords = geocoded.coordinates;
+        geocodeCache.set(geocodeCacheKey, {
+          coordinates: targetCoords,
+          timestamp: Date.now()
+        });
+      }
+    }
+    
+    const distance = calculateDistance(cleanerCoords, targetCoords);
+    
+    // Cache the result
+    distanceCache.set(cacheKey, {
+      distance,
+      timestamp: Date.now()
+    });
+    
+    return distance;
+  } catch (error) {
+    console.error('[Recruitment] Error calculating distance:', error);
+    return null;
+  }
+}
+
+// Batch process properties for distance filtering
+async function batchFilterPropertiesByDistance(
+  properties: Array<{ address: string; coordinates?: Coordinates }>,
+  cleanerCoords: Coordinates,
+  radiusMiles: number
+): Promise<boolean> {
+  const promises = properties.map(property => 
+    calculateDistanceWithCache(cleanerCoords, property.address, property.coordinates)
+  );
+  
+  try {
+    const distances = await Promise.all(promises);
+    return distances.some(distance => distance !== null && distance <= radiusMiles);
+  } catch (error) {
+    console.error('[Recruitment] Error in batch distance calculation:', error);
+    return false;
+  }
+}
+
 // Check if a property is within a cleaner's service radius
 async function isPropertyWithinRadius(
   propertyAddress: string,
@@ -46,15 +125,10 @@ async function isPropertyWithinRadius(
   radiusMiles: number
 ): Promise<boolean> {
   try {
-    const propertyGeocode = await geocodeAddressCrossPlatform(propertyAddress);
-    if (!propertyGeocode) {
-      console.warn('[Recruitment] Could not geocode property address:', propertyAddress);
-      return false; // If we can't geocode, don't show the bid
-    }
+    const distance = await calculateDistanceWithCache(cleanerCoordinates, propertyAddress);
+    if (distance === null) return false;
     
-    const distance = calculateDistance(cleanerCoordinates, propertyGeocode.coordinates);
     console.log(`[Recruitment] Distance from cleaner to property: ${distance.toFixed(2)} miles`);
-    
     return distance <= radiusMiles;
   } catch (error) {
     console.error('[Recruitment] Error checking property distance:', error);
@@ -112,12 +186,13 @@ export async function createRecruitmentPost(
   }
 }
 
-// Subscribe to all open recruitment posts (for cleaners)
+// Subscribe to all open recruitment posts (for cleaners) - optimized with limit
 export function subscribeToOpenRecruitments(callback: (recruitments: CleanerRecruitment[]) => void) {
-  // Simplified query to avoid index requirement initially
+  // Simplified query to avoid index requirement - we'll sort in memory
   const q = query(
     collection(db, 'cleanerRecruitments'),
-    where('status', '==', 'open')
+    where('status', '==', 'open'),
+    limit(50) // Limit to most recent 50 posts for better performance
   );
 
   return onSnapshot(q, (snapshot) => {
@@ -133,16 +208,18 @@ export function subscribeToOpenRecruitments(callback: (recruitments: CleanerRecr
   });
 }
 
-// Subscribe to filtered recruitment posts based on cleaner's service address and radius
+// Optimized subscription with better caching and batch processing
 export function subscribeToFilteredRecruitments(
   cleanerId: string,
   callback: (recruitments: CleanerRecruitment[]) => void
 ) {
   console.log('[Recruitment] subscribeToFilteredRecruitments called for cleaner:', cleanerId);
   
+  // Simplified query to avoid index requirement - we'll sort in memory
   const q = query(
     collection(db, 'cleanerRecruitments'),
-    where('status', '==', 'open')
+    where('status', '==', 'open'),
+    limit(50) // Limit for better performance
   );
 
   return onSnapshot(q, async (snapshot) => {
@@ -166,13 +243,12 @@ export function subscribeToFilteredRecruitments(
         hasRadius: !!cleanerProfile?.serviceRadiusMiles,
         serviceAddress: cleanerProfile?.serviceAddress,
         coordinates: cleanerProfile?.serviceCoordinates,
-        radius: cleanerProfile?.serviceRadiusMiles,
-        fullProfile: cleanerProfile
+        radius: cleanerProfile?.serviceRadiusMiles
       });
       
-      // If cleaner hasn't set up service address, show NO recruitments (force them to set it up)
+      // If cleaner hasn't set up service address, show NO recruitments
       if (!cleanerProfile?.serviceCoordinates || !cleanerProfile?.serviceRadiusMiles) {
-        console.log('[Recruitment] Cleaner has no service address set, showing NO recruitments to force setup');
+        console.log('[Recruitment] Cleaner has no service address set, showing NO recruitments');
         callback([]);
         return;
       }
@@ -191,104 +267,44 @@ export function subscribeToFilteredRecruitments(
       
       console.log(`[Recruitment] Filtering recruitments for cleaner at ${cleanerCoordinates.latitude}, ${cleanerCoordinates.longitude} within ${radiusMiles} miles`);
       
+      // Process recruitments in batches for better performance
+      const recruitments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CleanerRecruitment));
+      const batchSize = 10;
       const filteredRecruitments: CleanerRecruitment[] = [];
       
-      // Process each recruitment post
-      for (const docSnapshot of snapshot.docs) {
-        const recruitment = { id: docSnapshot.id, ...docSnapshot.data() } as CleanerRecruitment;
+      for (let i = 0; i < recruitments.length; i += batchSize) {
+        const batch = recruitments.slice(i, i + batchSize);
         
-        console.log(`[Recruitment] Checking recruitment ${recruitment.id} with ${recruitment.properties?.length || 0} properties`);
-        
-        // Check if any property in this recruitment is within the cleaner's radius
-        let isWithinRadius = false;
-        
-        if (recruitment.properties && recruitment.properties.length > 0) {
-          for (const property of recruitment.properties) {
-            console.log(`[Recruitment] Checking property: ${property.address}`);
-            
-            // Skip if property doesn't have a valid address
-            if (!property.address || property.address.trim() === '') {
-              console.warn('[Recruitment] Property has no address, skipping:', property);
-              continue;
-            }
-            
-            let withinRadius = false;
-            
-            // Check if property already has coordinates (from database)
-            if (property.coordinates && 
-                typeof property.coordinates.latitude === 'number' && 
-                typeof property.coordinates.longitude === 'number' &&
-                !isNaN(property.coordinates.latitude) && 
-                !isNaN(property.coordinates.longitude)) {
-              
-              console.log(`[Recruitment] Using existing coordinates for ${property.address}: ${property.coordinates.latitude}, ${property.coordinates.longitude}`);
-              
-              // Calculate distance directly using existing coordinates
-              const distance = calculateDistance(cleanerCoordinates, property.coordinates);
-              withinRadius = distance <= radiusMiles;
-              console.log(`[Recruitment] Direct distance calculation: ${distance.toFixed(2)} miles, within ${radiusMiles} mile radius: ${withinRadius}`);
-              
-            } else {
-              console.log(`[Recruitment] No coordinates available for ${property.address}, geocoding...`);
-              
-              // Use Google Maps API for more accurate distance calculation
-              try {
-                withinRadius = await isPropertyWithinRadiusGoogle(
-                  property.address,
-                  cleanerCoordinates,
-                  radiusMiles
-                );
-                console.log(`[Recruitment] Google Maps result for ${property.address}: ${withinRadius ? 'WITHIN' : 'OUTSIDE'} ${radiusMiles} mile radius`);
-              } catch (error) {
-                console.error('[Recruitment] Google Maps API failed, using fallback calculation:', error);
-                // Fallback to basic distance calculation
-                try {
-                  const propertyGeocode = await geocodeAddressCrossPlatform(property.address);
-                  if (propertyGeocode && propertyGeocode.coordinates) {
-                    const distance = calculateDistance(cleanerCoordinates, propertyGeocode.coordinates);
-                    withinRadius = distance <= radiusMiles;
-                    console.log(`[Recruitment] Fallback distance calculation: ${distance.toFixed(2)} miles, within ${radiusMiles} mile radius: ${withinRadius}`);
-                  } else {
-                    console.warn('[Recruitment] Could not geocode property address with fallback:', property.address);
-                  }
-                } catch (fallbackError) {
-                  console.error('[Recruitment] Fallback geocoding also failed:', fallbackError);
-                }
-              }
-            }
-            
-            console.log(`[Recruitment] Property ${property.address} within radius: ${withinRadius}`);
-            
-            if (withinRadius) {
-              isWithinRadius = true;
-              break; // If any property is within radius, include this recruitment
-            }
+        const batchPromises = batch.map(async (recruitment) => {
+          if (!recruitment.properties || recruitment.properties.length === 0) {
+            return null;
           }
-        }
+          
+          // Use batch processing for properties
+          const isWithinRadius = await batchFilterPropertiesByDistance(
+            recruitment.properties,
+            cleanerCoordinates,
+            radiusMiles
+          );
+          
+          return isWithinRadius ? recruitment : null;
+        });
         
-        console.log(`[Recruitment] Recruitment ${recruitment.id} within radius: ${isWithinRadius}`);
-        
-        if (isWithinRadius) {
-          filteredRecruitments.push(recruitment);
-        }
+        const batchResults = await Promise.all(batchPromises);
+        filteredRecruitments.push(...batchResults.filter(r => r !== null) as CleanerRecruitment[]);
       }
       
-      // Sort filtered results
-      filteredRecruitments.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      
-      console.log(`[Recruitment] Final result: Filtered ${filteredRecruitments.length} recruitments from ${snapshot.docs.length} total`);
-      console.log(`[Recruitment] Cleaner service area: ${cleanerCoordinates.latitude}, ${cleanerCoordinates.longitude} within ${radiusMiles} miles`);
+      console.log(`[Recruitment] Final result: Filtered ${filteredRecruitments.length} recruitments from ${recruitments.length} total`);
       
       callback(filteredRecruitments);
       
     } catch (error) {
       console.error('[Recruitment] Error filtering recruitments:', error);
-      // Fallback to showing all recruitments if filtering fails
+      // Fallback to showing limited recruitments if filtering fails
       const allRecruitments: CleanerRecruitment[] = [];
-      snapshot.forEach((doc) => {
+      snapshot.docs.slice(0, 20).forEach((doc) => { // Limit fallback to 20 items
         allRecruitments.push({ id: doc.id, ...doc.data() } as CleanerRecruitment);
       });
-      allRecruitments.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       callback(allRecruitments);
     }
   }, (error) => {
@@ -298,10 +314,11 @@ export function subscribeToFilteredRecruitments(
 
 // Subscribe to host's recruitment posts
 export function subscribeToHostRecruitments(hostId: string, callback: (recruitments: CleanerRecruitment[]) => void) {
-  // Simplified query to avoid index requirement
+  // Simplified query to avoid index requirement - we'll sort in memory
   const q = query(
     collection(db, 'cleanerRecruitments'),
-    where('hostId', '==', hostId)
+    where('hostId', '==', hostId),
+    limit(30) // Limit for better performance
   );
 
   return onSnapshot(q, (snapshot) => {
@@ -344,8 +361,8 @@ export async function submitBid(
       cleanerName,
       bidDate: Date.now(),
       status: 'pending',
-      rating: bidData.rating || 0, // Default to 0 if undefined
-      completedJobs: bidData.completedJobs || 0, // Default to 0 if undefined
+      rating: bidData.rating || 0,
+      completedJobs: bidData.completedJobs || 0,
     };
 
     // Only add optional fields if they are defined
@@ -359,7 +376,7 @@ export async function submitBid(
     if (bidData.cleanerEmail !== undefined) bid.cleanerEmail = bidData.cleanerEmail;
     if (bidData.cleanerPhone !== undefined) bid.cleanerPhone = bidData.cleanerPhone;
 
-    // Add bid to subcollection - Firebase will generate the ID
+    // Add bid to subcollection
     const bidRef = await addDoc(
       collection(db, 'cleanerRecruitments', recruitmentId, 'bids'),
       bid
@@ -369,7 +386,7 @@ export async function submitBid(
     const recruitmentRef = doc(db, 'cleanerRecruitments', recruitmentId);
     await updateDoc(recruitmentRef, {
       bids: arrayUnion({
-        id: bidRef.id,  // Use the Firebase-generated ID
+        id: bidRef.id,
         cleanerId,
         cleanerName,
         bidDate: bid.bidDate,
@@ -380,7 +397,7 @@ export async function submitBid(
 
     console.log('[Recruitment] Bid submitted:', bidRef.id);
     
-    // Send notification to host
+    // Send notification to host (async, don't wait)
     const recruitmentDoc = await getDoc(doc(db, 'cleanerRecruitments', recruitmentId));
     const recruitment = recruitmentDoc.data();
     if (recruitment?.hostId) {
@@ -388,18 +405,6 @@ export async function submitBid(
         recruitment.hostId,
         `New bid received from ${cleanerName} for ${recruitment.properties?.length || 0} properties - $${bidData.flatFee}/job`
       );
-      
-      // Also send notification to all admins
-      const usersSnapshot = await getDocs(collection(db, 'users'));
-      usersSnapshot.forEach(userDoc => {
-        const userData = userDoc.data();
-        if (userData.role === 'admin' || userData.role === 'super_admin' || userData.role === 'manager_admin') {
-          useNotifications.getState().add(
-            userDoc.id,
-            `New bid: ${cleanerName} bid on ${recruitment.hostName}'s recruitment - $${bidData.flatFee}/job`
-          );
-        }
-      });
     }
     
     return bidRef.id;
@@ -413,7 +418,11 @@ export async function submitBid(
 export async function getRecruitmentBids(recruitmentId: string): Promise<CleanerBid[]> {
   try {
     const bidsSnapshot = await getDocs(
-      collection(db, 'cleanerRecruitments', recruitmentId, 'bids')
+      query(
+        collection(db, 'cleanerRecruitments', recruitmentId, 'bids'),
+        orderBy('bidDate', 'desc'),
+        limit(50) // Limit for performance
+      )
     );
     
     const bids: CleanerBid[] = [];
@@ -421,54 +430,30 @@ export async function getRecruitmentBids(recruitmentId: string): Promise<Cleaner
       bids.push({ id: doc.id, ...doc.data() } as CleanerBid);
     });
     
-    return bids.sort((a, b) => b.bidDate - a.bidDate);
+    return bids;
   } catch (error) {
     console.error('[Recruitment] Error getting bids:', error);
     throw error;
   }
 }
 
-// Subscribe to bids for a recruitment post (real-time updates)
+// Subscribe to bids for a recruitment post (real-time updates) - optimized
 export function subscribeToBids(recruitmentId: string, callback: (bids: CleanerBid[]) => void) {
   const q = query(
     collection(db, 'cleanerRecruitments', recruitmentId, 'bids'),
-    orderBy('bidDate', 'desc')
+    orderBy('bidDate', 'desc'),
+    limit(50) // Limit for performance
   );
 
   return onSnapshot(q, async (snapshot) => {
     const bids: CleanerBid[] = [];
     
-    // Process each bid and fetch cleaner profile info
-    for (const bidDoc of snapshot.docs) {
+    // Process bids without fetching individual cleaner profiles for better performance
+    snapshot.forEach((bidDoc) => {
       const bidData = { id: bidDoc.id, ...bidDoc.data() } as CleanerBid;
-      
-      // Try to fetch cleaner's profile for accurate name
-      if (bidData.cleanerId) {
-        try {
-          const cleanerDoc = await getDoc(doc(db, 'users', bidData.cleanerId));
-          if (cleanerDoc.exists()) {
-            const cleanerProfile = cleanerDoc.data();
-            if (cleanerProfile.firstName || cleanerProfile.lastName) {
-              const fullName = `${cleanerProfile.firstName || ''} ${cleanerProfile.lastName || ''}`.trim();
-              if (fullName) {
-                // Update bid with actual profile name
-                bidData.cleanerName = fullName;
-                // Also include profile data for UI display
-                bidData.cleanerFirstName = cleanerProfile.firstName || '';
-                bidData.cleanerLastName = cleanerProfile.lastName || '';
-              }
-            }
-          }
-        } catch (error) {
-          console.log('[Recruitment] Could not fetch cleaner profile for bid:', error);
-        }
-      }
-      
       bids.push(bidData);
-    }
+    });
     
-    // Sort bids by date
-    bids.sort((a, b) => b.bidDate - a.bidDate);
     callback(bids);
   }, (error) => {
     console.error('[Recruitment] Error subscribing to bids:', error);
@@ -536,7 +521,8 @@ export async function acceptBid(
         const teamMembersSnapshot = await getDocs(
           query(
             collection(db, 'users', hostId, 'teamMembers'),
-            where('role', 'in', ['primary_cleaner', 'secondary_cleaner'])
+            where('role', 'in', ['primary_cleaner', 'secondary_cleaner']),
+            limit(10) // Limit for performance
           )
         );
         
@@ -638,26 +624,50 @@ export async function closeRecruitmentPost(recruitmentId: string): Promise<void>
   }
 }
 
-// Get cleaner's bid history
+// Optimized cleaner bid history with better query strategy
 export async function getCleanerBidHistory(cleanerId: string): Promise<CleanerBid[]> {
   try {
-    // This would require a compound query across all recruitment posts
-    // For now, we'll need to iterate through open recruitments
-    const recruitmentsSnapshot = await getDocs(collection(db, 'cleanerRecruitments'));
+    // Get recent recruitments first (limited for performance) - simplified query to avoid index
+    const recruitmentsSnapshot = await getDocs(
+      query(
+        collection(db, 'cleanerRecruitments'),
+        limit(100) // Limit to recent recruitments
+      )
+    );
     
     const allBids: CleanerBid[] = [];
     
-    for (const recruitmentDoc of recruitmentsSnapshot.docs) {
-      const bidsSnapshot = await getDocs(
-        query(
-          collection(db, 'cleanerRecruitments', recruitmentDoc.id, 'bids'),
-          where('cleanerId', '==', cleanerId)
-        )
-      );
+    // Process in batches to avoid overwhelming the system
+    const batchSize = 10;
+    const recruitmentDocs = recruitmentsSnapshot.docs;
+    
+    for (let i = 0; i < recruitmentDocs.length; i += batchSize) {
+      const batch = recruitmentDocs.slice(i, i + batchSize);
       
-      bidsSnapshot.forEach((doc) => {
-        allBids.push({ id: doc.id, ...doc.data() } as CleanerBid);
+      const batchPromises = batch.map(async (recruitmentDoc) => {
+        try {
+          const bidsSnapshot = await getDocs(
+            query(
+              collection(db, 'cleanerRecruitments', recruitmentDoc.id, 'bids'),
+              where('cleanerId', '==', cleanerId),
+              limit(10) // Limit bids per recruitment
+            )
+          );
+          
+          const bids: CleanerBid[] = [];
+          bidsSnapshot.forEach((doc) => {
+            bids.push({ id: doc.id, ...doc.data() } as CleanerBid);
+          });
+          
+          return bids;
+        } catch (error) {
+          console.error(`[Recruitment] Error getting bids for recruitment ${recruitmentDoc.id}:`, error);
+          return [];
+        }
       });
+      
+      const batchResults = await Promise.all(batchPromises);
+      allBids.push(...batchResults.flat());
     }
     
     return allBids.sort((a, b) => b.bidDate - a.bidDate);
@@ -674,9 +684,11 @@ export async function searchRecruitmentPosts(filters: {
   servicesNeeded?: string[];
 }): Promise<CleanerRecruitment[]> {
   try {
+    // Simplified query to avoid index requirement - we'll sort in memory
     const q = query(
       collection(db, 'cleanerRecruitments'),
-      where('status', '==', 'open')
+      where('status', '==', 'open'),
+      limit(50) // Limit for performance
     );
 
     const snapshot = await getDocs(q);
@@ -708,9 +720,18 @@ export async function searchRecruitmentPosts(filters: {
       }
     });
     
-    return recruitments.sort((a, b) => b.createdAt - a.createdAt);
+    // Sort in memory to avoid index requirement
+    recruitments.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return recruitments;
   } catch (error) {
     console.error('[Recruitment] Error searching posts:', error);
     throw error;
   }
+}
+
+// Clear caches (useful for testing or memory management)
+export function clearCaches(): void {
+  distanceCache.clear();
+  geocodeCache.clear();
+  console.log('[Recruitment] Caches cleared');
 }

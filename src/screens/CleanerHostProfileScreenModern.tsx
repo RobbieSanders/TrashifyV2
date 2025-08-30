@@ -32,7 +32,8 @@ import {
   query,
   where,
   getDocs,
-  getDoc
+  getDoc,
+  limit
 } from 'firebase/firestore';
 import { db } from '../utils/firebase';
 import { geocodeAddressCrossPlatform } from '../services/geocodingService';
@@ -243,63 +244,95 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
     );
   };
 
-  // Load cleaner-specific data
+  // Load cleaner-specific data - optimized with limits and better queries
   const loadCleanerData = async () => {
     if (!user?.uid) return;
     
     try {
-      // Load pending bids
+      // Load pending bids - optimized with limit
       const bidsQuery = query(
         collection(db, 'cleanerRecruitments'),
         where('cleanerId', '==', user.uid),
-        where('status', '==', 'pending')
+        where('status', '==', 'pending'),
+        limit(20) // Limit for performance
       );
       const bidsSnapshot = await getDocs(bidsQuery);
       const bidsData = bidsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setPendingBids(bidsData);
 
-      // Load managed properties (properties where this cleaner is assigned)
-      const propertiesQuery = query(collection(db, 'properties'));
-      const propertiesSnapshot = await getDocs(propertiesQuery);
-      const allProperties = propertiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      // Filter properties where this cleaner is assigned
-      const managedProps = allProperties.filter((property: any) => 
-        property.assignedCleaners && property.assignedCleaners.includes(user.uid)
+      // Load managed properties - optimized query
+      const propertiesQuery = query(
+        collection(db, 'properties'),
+        where('assignedCleaners', 'array-contains', user.uid),
+        limit(50) // Limit for performance
       );
+      const propertiesSnapshot = await getDocs(propertiesQuery);
+      const managedProps = propertiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setManagedProperties(managedProps);
 
-      // Load cleaning teams this cleaner is part of
-      const teamsQuery = query(collection(db, 'users'));
-      const teamsSnapshot = await getDocs(teamsQuery);
+      // Load cleaning teams this cleaner is part of - optimized approach
+      // Instead of querying all users, we'll use a more targeted approach
       const cleaningTeamsData: any[] = [];
       
-      for (const hostDoc of teamsSnapshot.docs) {
-        const hostData = hostDoc.data();
-        const teamMembersRef = collection(db, 'users', hostDoc.id, 'teamMembers');
-        const teamSnapshot = await getDocs(teamMembersRef);
+      // Query team members collections where this user might be a member
+      // This is more efficient than checking all users
+      try {
+        // We'll need to implement a more efficient way to find teams
+        // For now, let's limit the user query and add pagination
+        const teamsQuery = query(
+          collection(db, 'users'),
+          limit(100) // Limit users to check
+        );
+        const teamsSnapshot = await getDocs(teamsQuery);
         
-        const isPartOfTeam = teamSnapshot.docs.some(memberDoc => {
-          const memberData = memberDoc.data();
-          return memberData.userId === user.uid || memberData.name === `${user.firstName} ${user.lastName}`.trim();
-        });
+        // Process in batches to avoid overwhelming the system
+        const batchSize = 10;
+        const userDocs = teamsSnapshot.docs;
         
-        if (isPartOfTeam) {
-          // Get host's properties
-          const hostPropertiesQuery = query(
-            collection(db, 'properties'),
-            where('hostId', '==', hostDoc.id)
-          );
-          const hostPropertiesSnapshot = await getDocs(hostPropertiesQuery);
-          const hostProperties = hostPropertiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        for (let i = 0; i < userDocs.length; i += batchSize) {
+          const batch = userDocs.slice(i, i + batchSize);
           
-          cleaningTeamsData.push({
-            hostId: hostDoc.id,
-            hostName: `${hostData.firstName || ''} ${hostData.lastName || ''}`.trim() || hostData.email,
-            properties: hostProperties
+          const batchPromises = batch.map(async (hostDoc) => {
+            try {
+              const hostData = hostDoc.data();
+              const teamMembersRef = collection(db, 'users', hostDoc.id, 'teamMembers');
+              const teamSnapshot = await getDocs(query(teamMembersRef, limit(20)));
+              
+              const isPartOfTeam = teamSnapshot.docs.some(memberDoc => {
+                const memberData = memberDoc.data();
+                return memberData.userId === user.uid || memberData.name === `${user.firstName} ${user.lastName}`.trim();
+              });
+              
+              if (isPartOfTeam) {
+                // Get host's properties with limit
+                const hostPropertiesQuery = query(
+                  collection(db, 'properties'),
+                  where('hostId', '==', hostDoc.id),
+                  limit(20)
+                );
+                const hostPropertiesSnapshot = await getDocs(hostPropertiesQuery);
+                const hostProperties = hostPropertiesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                return {
+                  hostId: hostDoc.id,
+                  hostName: `${hostData.firstName || ''} ${hostData.lastName || ''}`.trim() || hostData.email,
+                  properties: hostProperties
+                };
+              }
+              return null;
+            } catch (error) {
+              console.error('Error processing team for host:', hostDoc.id, error);
+              return null;
+            }
           });
+          
+          const batchResults = await Promise.all(batchPromises);
+          cleaningTeamsData.push(...batchResults.filter(team => team !== null));
         }
+      } catch (error) {
+        console.error('Error loading cleaning teams:', error);
       }
+      
       setCleaningTeams(cleaningTeamsData);
 
     } catch (error) {

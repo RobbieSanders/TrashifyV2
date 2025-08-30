@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -38,9 +38,6 @@ export function CleanerBiddingScreen({ navigation }: any) {
   const [sortBy, setSortBy] = useState<'newest' | 'turnovers' | 'location'>('newest');
   const [filterBy, setFilterBy] = useState<'all' | 'high-volume' | 'emergency-cleanings'>('all');
   
-  // Distance tracking
-  const [recruitmentDistances, setRecruitmentDistances] = useState<{[key: string]: number}>({});
-
   // Bid form fields
   const [flatFee, setFlatFee] = useState('');
   const [experience, setExperience] = useState('');
@@ -79,62 +76,59 @@ export function CleanerBiddingScreen({ navigation }: any) {
     });
 
     return () => unsubscribe();
-  }, [user?.uid, (user?.cleanerProfile as any)?.serviceRadiusMiles, (user?.cleanerProfile as any)?.serviceCoordinates]);
-
-  // Load cleaner's bid history
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    const loadBidHistory = async () => {
-      try {
-        const bids = await getCleanerBidHistory(user.uid);
-        setMyBids(bids);
-      } catch (error) {
-        console.error('Error loading bid history:', error);
-      } finally {
-        setLoadingBids(false);
-      }
-    };
-
-    loadBidHistory();
   }, [user?.uid]);
 
-  // Calculate distances for recruitments
+  // Load cleaner's bid history - optimized with useCallback
+  const loadBidHistory = useCallback(async () => {
+    if (!user?.uid) return;
+
+    try {
+      const bids = await getCleanerBidHistory(user.uid);
+      setMyBids(bids);
+    } catch (error) {
+      console.error('Error loading bid history:', error);
+    } finally {
+      setLoadingBids(false);
+    }
+  }, [user?.uid]);
+
   useEffect(() => {
-    const calculateDistances = async () => {
-      const cleanerProfile = user?.cleanerProfile as any;
-      if (!cleanerProfile?.serviceCoordinates || openRecruitments.length === 0) return;
+    loadBidHistory();
+  }, [loadBidHistory]);
 
-      const cleanerCoords = cleanerProfile.serviceCoordinates;
-      const distances: {[key: string]: number} = {};
+  // Calculate distances for recruitments - optimized with useMemo and simple calculation
+  const recruitmentDistances = useMemo(() => {
+    const distances: {[key: string]: number} = {};
+    
+    const cleanerProfile = user?.cleanerProfile as any;
+    if (!cleanerProfile?.serviceCoordinates || openRecruitments.length === 0) {
+      return distances;
+    }
 
-      for (const recruitment of openRecruitments) {
-        if (recruitment.properties && recruitment.properties.length > 0) {
-          // Calculate distance to the first property (or average if multiple)
-          const property = recruitment.properties[0];
+    const cleanerCoords = cleanerProfile.serviceCoordinates;
+    
+    openRecruitments.forEach(recruitment => {
+      if (recruitment.properties && recruitment.properties.length > 0) {
+        const property = recruitment.properties[0];
+        
+        if (property.coordinates) {
+          // Simple distance calculation without API calls for better performance
+          const R = 3959; // Earth's radius in miles
+          const dLat = (property.coordinates.latitude - cleanerCoords.latitude) * Math.PI / 180;
+          const dLon = (property.coordinates.longitude - cleanerCoords.longitude) * Math.PI / 180;
+          const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(cleanerCoords.latitude * Math.PI / 180) * Math.cos(property.coordinates.latitude * Math.PI / 180) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const distance = R * c;
           
-          if (property.coordinates) {
-            // Use pre-geocoded coordinates if available
-            try {
-              const distance = await calculateDistanceGoogle(cleanerCoords, property.coordinates);
-              if (distance !== null) {
-                distances[recruitment.id] = distance;
-              }
-            } catch (error) {
-              console.error('Error calculating distance for recruitment:', recruitment.id, error);
-            }
-          } else if (property.address) {
-            // Fallback: use address for geocoding (this would be slower)
-            // For now, we'll skip this to avoid too many API calls
-            console.log('Property coordinates not available for:', property.address);
-          }
+          distances[recruitment.id] = distance;
         }
       }
+    });
 
-      setRecruitmentDistances(distances);
-    };
-
-    calculateDistances();
+    return distances;
   }, [openRecruitments, (user?.cleanerProfile as any)?.serviceCoordinates]);
 
   const handleSubmitBid = async () => {
@@ -183,8 +177,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
       setSpecialties([]);
       
       // Reload bid history
-      const bids = await getCleanerBidHistory(user!.uid);
-      setMyBids(bids);
+      await loadBidHistory();
     } catch (error) {
       console.error('Error submitting bid:', error);
       Alert.alert('Error', 'Failed to submit application');
@@ -193,18 +186,18 @@ export function CleanerBiddingScreen({ navigation }: any) {
     }
   };
 
-  // Check if cleaner has already bid on a recruitment
-  const hasAlreadyBid = (recruitmentId: string) => {
+  // Check if cleaner has already bid on a recruitment - memoized for performance
+  const hasAlreadyBid = useCallback((recruitmentId: string) => {
     return myBids.some(bid => bid.recruitmentId === recruitmentId);
-  };
+  }, [myBids]);
   
-  // Get bid for a specific recruitment
-  const getBidForRecruitment = (recruitmentId: string) => {
+  // Get bid for a specific recruitment - memoized for performance
+  const getBidForRecruitment = useCallback((recruitmentId: string) => {
     return myBids.find(bid => bid.recruitmentId === recruitmentId);
-  };
+  }, [myBids]);
 
-  // Handle withdrawing a bid
-  const handleWithdrawBid = async (recruitmentId: string, bidId: string) => {
+  // Handle withdrawing a bid - optimized with useCallback
+  const handleWithdrawBid = useCallback(async (recruitmentId: string, bidId: string) => {
     Alert.alert(
       'Withdraw Application',
       'Are you sure you want to withdraw your application?',
@@ -218,8 +211,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
               await withdrawBid(recruitmentId, bidId);
               Alert.alert('Success', 'Your application has been withdrawn');
               // Reload bid history
-              const bids = await getCleanerBidHistory(user!.uid);
-              setMyBids(bids);
+              await loadBidHistory();
             } catch (error) {
               console.error('Error withdrawing bid:', error);
               Alert.alert('Error', 'Failed to withdraw application');
@@ -228,10 +220,10 @@ export function CleanerBiddingScreen({ navigation }: any) {
         }
       ]
     );
-  };
+  }, [loadBidHistory]);
 
-  // Filter and sort recruitments
-  const getFilteredAndSortedRecruitments = () => {
+  // Filter and sort recruitments - memoized for performance
+  const filteredAndSortedRecruitments = useMemo(() => {
     let filtered = [...openRecruitments];
 
     // Apply filters
@@ -271,14 +263,10 @@ export function CleanerBiddingScreen({ navigation }: any) {
 
     // Return unapplied first, then applied at the bottom
     return [...unapplied, ...applied];
-  };
+  }, [openRecruitments, filterBy, sortBy, hasAlreadyBid, recruitmentDistances]);
 
-  // Calculate estimated monthly earnings based on property characteristics:
-  // - More conservative base rates: $25-35 per bedroom + $12-18 per bathroom
-  // - Reduced square footage bonus: $0.05-0.10 per sq ft for larger properties
-  // - Turnover frequency multiplier
-  // Example: 2BR/2BA (1000 sq ft) = $50-75 per job × 4 turnovers/month = $200-300/month
-  const getEstimatedMonthlyEarnings = (recruitment: CleanerRecruitment, bidAmount?: number) => {
+  // Calculate estimated monthly earnings - memoized for performance
+  const getEstimatedMonthlyEarnings = useCallback((recruitment: CleanerRecruitment, bidAmount?: number) => {
     if (bidAmount) {
       // If cleaner has entered a rate, use their rate
       const turnovers = recruitment.estimatedTurnoversPerMonth || 1;
@@ -307,7 +295,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
     }
     
     return totalEstimate * turnovers;
-  };
+  }, []);
 
   return (
     <>
@@ -454,7 +442,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
         {/* Available Opportunities */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Available Opportunities</Text>
-          {getFilteredAndSortedRecruitments().length === 0 ? (
+          {filteredAndSortedRecruitments.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="search" size={48} color="#CBD5E1" />
               <Text style={styles.emptyStateTitle}>No opportunities found</Text>
@@ -463,7 +451,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
               </Text>
             </View>
           ) : (
-            getFilteredAndSortedRecruitments().map(recruitment => {
+            filteredAndSortedRecruitments.map((recruitment: CleanerRecruitment) => {
               const alreadyBid = hasAlreadyBid(recruitment.id);
               const myBid = getBidForRecruitment(recruitment.id);
               const estimatedEarnings = getEstimatedMonthlyEarnings(recruitment);
