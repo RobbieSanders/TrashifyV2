@@ -11,6 +11,7 @@ import {
   signInAnonymously,
   initializeAuth
 } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 // @ts-ignore - getReactNativePersistence is available but not in types
 import { getReactNativePersistence } from 'firebase/auth';
 import { Platform } from 'react-native';
@@ -30,6 +31,7 @@ const firebaseConfig = {
 let app: any;
 let db: any;
 let auth: any;
+let storage: any;
 
 try {
   if (!getApps().length) {
@@ -67,6 +69,10 @@ try {
       console.log('[firebase] Firestore initialized for web');
     }
     
+    // Initialize Storage
+    storage = getStorage(app);
+    console.log('[firebase] Storage initialized');
+    
     // Enable network to ensure connection
     enableNetwork(db).then(() => {
       console.log('[firebase] Network enabled');
@@ -84,13 +90,14 @@ try {
     app = getApps()[0];
     auth = getAuth(app);
     db = getFirestore(app);
+    storage = getStorage(app);
     console.log('[firebase] Using existing app instance');
   }
 } catch (error) {
   console.error('[firebase] Initialization error:', error);
 }
 
-export { db, auth };
+export { db, auth, storage };
 export const isFirebaseConfigured = !!(
   process.env.EXPO_PUBLIC_FIREBASE_API_KEY &&
   process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN &&

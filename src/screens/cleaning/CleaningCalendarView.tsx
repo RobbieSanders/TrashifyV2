@@ -496,7 +496,7 @@ const CleaningCalendarView: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC'
+    backgroundColor: '#F3F4F6'
   },
   scrollContent: {
     paddingBottom: Platform.OS === 'ios' ? 90 : 80,
@@ -505,21 +505,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC'
+    backgroundColor: '#F8FAFC',
+    padding: 20
   },
   loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#64748B'
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1E293B',
+    marginBottom: 8,
+    textAlign: 'center'
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1E88E5',
-    paddingVertical: 20,
-    paddingHorizontal: 24,
-    shadowColor: '#1E88E5',
+    backgroundColor: '#3B82F6',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    shadowColor: '#3B82F6',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -529,28 +532,28 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   monthYear: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
     color: 'white',
-    letterSpacing: 0.5,
+    letterSpacing: -0.5,
   },
   todayButton: {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: 13,
-    marginTop: 6,
+    fontSize: 11,
+    marginTop: 4,
     fontWeight: '600',
     textDecorationLine: 'underline'
   },
   navButton: {
     backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 20,
-    width: 40,
-    height: 40,
+    borderRadius: 12,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
   },
   navButtonText: {
-    fontSize: 20,
+    fontSize: 18,
     color: 'white',
     fontWeight: '600'
   },
@@ -558,14 +561,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
     paddingVertical: 12,
-    marginHorizontal: 16,
+    marginHorizontal: 20,
     marginTop: 16,
-    borderRadius: 12,
+    borderRadius: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
     elevation: 3,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
   },
   dayNameCell: {
     flex: 1,
@@ -573,24 +578,26 @@ const styles = StyleSheet.create({
   },
   dayNameText: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#64748B',
+    fontWeight: '600',
+    color: '#374151',
+    letterSpacing: 0.2,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     backgroundColor: '#FFFFFF',
-    marginHorizontal: 16,
+    marginHorizontal: 20,
     marginTop: 8,
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
     elevation: 3,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
   },
   dayCell: {
     width: '14.28%',
@@ -605,19 +612,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC'
   },
   todayCell: {
-    backgroundColor: '#E0F2FE'
+    backgroundColor: 'rgba(59, 130, 246, 0.1)'
   },
   dayNumber: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#0F172A'
+    fontWeight: '800',
+    color: '#1E293B',
+    letterSpacing: -0.5,
   },
   otherMonthDayNumber: {
-    color: '#CBD5E1'
+    color: '#94A3B8'
   },
   todayNumber: {
-    fontWeight: '700',
-    color: '#0369A1'
+    fontWeight: '800',
+    color: '#3B82F6'
   },
   cleaningInfo: {
     marginTop: 2,
@@ -643,13 +651,13 @@ const styles = StyleSheet.create({
   },
   moreIndicator: {
     fontSize: 7,
-    color: '#1E88E5',
+    color: '#3B82F6',
     marginLeft: 1,
     fontWeight: '700'
   },
   cleaningTime: {
     fontSize: 7,
-    color: '#1E88E5',
+    color: '#3B82F6',
     fontWeight: '700',
     marginTop: 0.5,
     textAlign: 'center'
@@ -671,69 +679,73 @@ const styles = StyleSheet.create({
   upcomingSection: {
     backgroundColor: '#FFFFFF',
     marginTop: 24,
-    marginHorizontal: 16,
+    marginHorizontal: 20,
     borderRadius: 16,
     padding: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
   },
   upcomingSectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1E293B',
+    letterSpacing: -0.5,
     marginBottom: 16,
-    letterSpacing: 0.3,
   },
   noCleaningsText: {
-    fontSize: 15,
-    color: '#94A3B8',
-    fontStyle: 'italic',
+    color: '#64748B',
+    fontSize: 13,
+    lineHeight: 18,
     textAlign: 'center',
-    paddingVertical: 24
+    paddingVertical: 20
   },
   cleaningCard: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginBottom: 12,
+    borderRadius: 16,
+    marginBottom: 10,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#F1F5F9',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowRadius: 12,
+    elevation: 3,
   },
   statusIndicator: {
     width: 4,
-    marginRight: 12,
+    marginRight: 10,
     borderRadius: 2
   },
   cleaningCardContent: {
     flex: 1
   },
   cleaningAddress: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 5
+    fontSize: 14,
+    color: '#475569',
+    fontWeight: '500',
+    lineHeight: 20,
+    marginBottom: 4
   },
   cleaningCardDetails: {
-    marginBottom: 5
+    marginBottom: 4
   },
   cleaningDate: {
-    fontSize: 14,
-    color: '#666',
+    color: '#64748B',
+    fontSize: 12,
+    lineHeight: 16,
     marginBottom: 2
   },
   cleanerAssigned: {
-    fontSize: 14,
-    color: '#4ECDC4',
-    fontWeight: '500'
+    fontSize: 12,
+    color: '#10B981',
+    fontWeight: '600'
   },
   cleaningCardFooter: {
     flexDirection: 'row',
@@ -741,50 +753,56 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   cleaningType: {
+    color: '#64748B',
     fontSize: 12,
-    color: '#999',
+    lineHeight: 16,
     textTransform: 'capitalize'
   },
   emergencyBadge: {
-    backgroundColor: '#ff6b6b',
+    backgroundColor: '#EF4444',
     color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: 10
   },
   guestInfo: {
-    fontSize: 13,
-    color: '#888',
+    color: '#64748B',
+    fontSize: 12,
+    lineHeight: 16,
     marginTop: 2,
     fontStyle: 'italic'
   },
   checkoutInfo: {
+    color: '#64748B',
     fontSize: 11,
-    color: '#999',
-    marginLeft: 8
+    lineHeight: 14,
+    marginLeft: 6
   },
   // Modal styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 20,
-    width: '90%',
-    maxWidth: 400,
-    maxHeight: '70%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 420,
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 20 },
     shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowRadius: 25,
+    elevation: 20,
+    overflow: 'hidden',
+    padding: 28,
+    maxHeight: '70%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -793,99 +811,114 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     paddingBottom: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#F1F5F9',
+    width: '100%',
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontWeight: '800',
+    color: '#1E293B',
+    letterSpacing: -0.5,
     flex: 1,
   },
   closeButton: {
-    fontSize: 24,
+    fontSize: 20,
     color: '#64748B',
     fontWeight: '300',
     paddingLeft: 10,
   },
   modalScrollView: {
     maxHeight: 300,
+    width: '100%',
   },
   modalCleaningCard: {
     flexDirection: 'row',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    marginBottom: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginBottom: 10,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#F1F5F9',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
   },
   modalStatusIndicator: {
     width: 4,
-    marginRight: 12,
+    marginRight: 10,
     borderRadius: 2,
   },
   modalCleaningContent: {
     flex: 1,
   },
   modalCleaningAddress: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0F172A',
-    marginBottom: 8,
+    fontSize: 14,
+    color: '#475569',
+    fontWeight: '500',
+    lineHeight: 20,
+    marginBottom: 6,
   },
   modalCleaningTime: {
-    fontSize: 14,
-    color: '#1E88E5',
+    fontSize: 12,
+    color: '#3B82F6',
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   modalCleanerName: {
-    fontSize: 14,
     color: '#64748B',
-    marginBottom: 4,
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 3,
   },
   modalGuestInfo: {
-    fontSize: 13,
     color: '#64748B',
+    fontSize: 12,
+    lineHeight: 16,
     fontStyle: 'italic',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   modalStatusBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#E3F2FD',
-    paddingHorizontal: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   modalStatusText: {
-    fontSize: 11,
-    color: '#1E88E5',
+    color: '#475569',
+    fontSize: 10,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   // Manual Clean Button styles
   manualCleanButtonContainer: {
-    marginHorizontal: 16,
+    marginHorizontal: 20,
     marginTop: 12,
   },
   manualCleanButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#3B82F6',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingHorizontal: 20,
     borderRadius: 12,
-    shadowColor: '#10B981',
-    shadowOffset: { width: 0, height: 2 },
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   manualCleanButtonText: {
     color: 'white',
-    fontSize: 15,
-    fontWeight: '600',
-    marginLeft: 8,
+    fontWeight: '700',
+    fontSize: 14,
+    letterSpacing: 0.3,
+    marginLeft: 6,
   },
   // Emergency cleaning card styles
   emergencyCleaningCard: {

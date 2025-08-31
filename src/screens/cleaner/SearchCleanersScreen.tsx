@@ -39,6 +39,9 @@ export function SearchCleanersScreen({ navigation }: any) {
   const [showBidsModal, setShowBidsModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [emergencyBids, setEmergencyBids] = useState<any[]>([]);
+  const [showArchive, setShowArchive] = useState(false);
+  const [archivedRecruitments, setArchivedRecruitments] = useState<CleanerRecruitment[]>([]);
+  const [archivedEmergencyJobs, setArchivedEmergencyJobs] = useState<any[]>([]);
 
   // Property selection
   const [useExistingProperty, setUseExistingProperty] = useState(true);
@@ -86,7 +89,12 @@ export function SearchCleanersScreen({ navigation }: any) {
     if (!user?.uid) return;
 
     const unsubscribe = subscribeToHostRecruitments(user.uid, (recruitments) => {
-      setMyRecruitments(recruitments);
+      // Separate active and archived recruitments
+      const active = recruitments.filter(r => r.status === 'open');
+      const archived = recruitments.filter(r => r.status === 'closed');
+      
+      setMyRecruitments(active);
+      setArchivedRecruitments(archived);
     });
 
     return () => unsubscribe();
@@ -96,23 +104,33 @@ export function SearchCleanersScreen({ navigation }: any) {
   useEffect(() => {
     if (!user?.uid) return;
 
+    // Subscribe to all emergency jobs (active and completed)
     const emergencyJobsRef = collection(db, 'cleaningJobs');
     const emergencyJobsQuery = query(
       emergencyJobsRef,
       where('hostId', '==', user.uid),
-      where('isEmergency', '==', true),
-      where('status', 'in', ['bidding', 'open'])
+      where('isEmergency', '==', true)
     );
     
     const unsubscribe = onSnapshot(emergencyJobsQuery, (snapshot) => {
-      const jobs: any[] = [];
+      const activeJobs: any[] = [];
+      const archivedJobs: any[] = [];
+      
       snapshot.forEach((doc) => {
-        jobs.push({ id: doc.id, ...doc.data() });
+        const job = { id: doc.id, ...doc.data() } as any;
+        if (['bidding', 'open'].includes(job.status)) {
+          activeJobs.push(job);
+        } else if (['completed', 'cancelled', 'assigned'].includes(job.status)) {
+          archivedJobs.push(job);
+        }
       });
-      setMyEmergencyJobs(jobs);
+      
+      setMyEmergencyJobs(activeJobs);
+      setArchivedEmergencyJobs(archivedJobs);
     }, (error) => {
       console.error('[SearchCleaners] Error loading emergency jobs:', error);
       setMyEmergencyJobs([]);
+      setArchivedEmergencyJobs([]);
     });
 
     return () => unsubscribe();
@@ -533,21 +551,40 @@ export function SearchCleanersScreen({ navigation }: any) {
         </TouchableOpacity>
 
         {/* My Recruitment Posts */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>My Recruitment Posts</Text>
+        <View style={[styles.section, styles.sectionWithBottomPadding]}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>My Recruitment Posts</Text>
+            <View style={styles.sectionActions}>
+              <TouchableOpacity
+                style={[styles.archiveToggle, showArchive && styles.archiveToggleActive]}
+                onPress={() => setShowArchive(!showArchive)}
+              >
+                <Ionicons 
+                  name={showArchive ? "folder-open" : "archive"} 
+                  size={16} 
+                  color={showArchive ? "#10B981" : "#64748B"} 
+                />
+                <Text style={[styles.archiveToggleText, showArchive && styles.archiveToggleTextActive]}>
+                  {showArchive ? "Active" : "Archive"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
           
-          {/* Emergency Jobs Section */}
-          {myEmergencyJobs.length > 0 && (
+          {!showArchive ? (
             <>
-              <View style={styles.emergencyJobsHeader}>
-                <View style={styles.emergencyHeaderLeft}>
-                  <Ionicons name="warning" size={20} color="#DC2626" />
-                  <Text style={styles.emergencyJobsTitle}>🚨 Emergency Cleanings</Text>
-                </View>
-                <View style={styles.emergencyBadge}>
-                  <Text style={styles.emergencyBadgeText}>{myEmergencyJobs.length} ACTIVE</Text>
-                </View>
-              </View>
+              {/* Emergency Jobs Section */}
+              {myEmergencyJobs.length > 0 && (
+                <>
+                  <View style={styles.emergencyJobsHeader}>
+                    <View style={styles.emergencyHeaderLeft}>
+                      <Ionicons name="warning" size={20} color="#DC2626" />
+                      <Text style={styles.emergencyJobsTitle}>🚨 Emergency Cleanings</Text>
+                    </View>
+                    <View style={styles.emergencyBadge}>
+                      <Text style={styles.emergencyBadgeText}>{myEmergencyJobs.length} ACTIVE</Text>
+                    </View>
+                  </View>
               
               {myEmergencyJobs.map(job => {
                 const urgencyColor = job.urgencyLevel === 'immediate' ? '#DC2626' : 
@@ -555,22 +592,22 @@ export function SearchCleanersScreen({ navigation }: any) {
                 
                 return (
                   <View key={job.id} style={[styles.recruitmentCard, styles.emergencyJobCard]}>
-                    <View style={styles.cardHeader}>
+                    <View style={styles.emergencyJobHeaderSection}>
                       <View style={styles.emergencyJobHeader}>
                         <View style={[styles.emergencyJobIcon, { backgroundColor: urgencyColor }]}>
-                          <Ionicons name="flash" size={16} color="white" />
+                          <Ionicons name="flash" size={14} color="white" />
                         </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.recruitmentTitle, { color: urgencyColor }]}>
+                        <View style={styles.emergencyJobContent}>
+                          <Text style={[styles.emergencyJobTitle, { color: urgencyColor }]}>
                             EMERGENCY CLEANING
                           </Text>
-                          <Text style={styles.emergencyJobAddress}>
+                          <Text style={styles.emergencyJobAddress} numberOfLines={1}>
                             {job.address}
                           </Text>
                         </View>
                       </View>
-                      <View style={[styles.statusBadge, { backgroundColor: '#FEE2E2' }]}>
-                        <Text style={[styles.statusText, { color: '#DC2626' }]}>
+                      <View style={styles.emergencyStatusBadge}>
+                        <Text style={styles.emergencyStatusText}>
                           {job.status.toUpperCase()}
                         </Text>
                       </View>
@@ -704,81 +741,198 @@ export function SearchCleanersScreen({ navigation }: any) {
                     ))}
                   </View>
                 );
-              })}
-            </>
-          )}
-          
-          {/* Regular Team Recruitment Posts */}
-          {myRecruitments.length === 0 && myEmergencyJobs.length === 0 ? (
-            <Text style={styles.emptyText}>No recruitment posts yet</Text>
-          ) : (
-            myRecruitments.map(recruitment => (
-              <TouchableOpacity
-                key={recruitment.id}
-                style={[styles.recruitmentCard, 
-                  recruitment.status === 'closed' && styles.closedCard
-                ]}
-                onPress={() => {
-                  setSelectedRecruitment(recruitment);
-                  setShowBidsModal(true);
-                }}
-              >
-                <View style={styles.cardHeader}>
-                  <Text style={styles.recruitmentTitle}>
-                    {recruitment.properties.length} {recruitment.properties.length === 1 ? 'Property' : 'Properties'}
-                  </Text>
-                  <View style={[styles.statusBadge,
-                    recruitment.status === 'closed' && styles.closedBadge
-                  ]}>
-                    <Text style={styles.statusText}>
-                      {recruitment.status.toUpperCase()}
-                    </Text>
-                  </View>
+                  })}
+                </>
+              )}
+              
+              {/* Regular Team Recruitment Posts */}
+              {myRecruitments.length === 0 && myEmergencyJobs.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="search-outline" size={48} color="#CBD5E1" />
+                  <Text style={styles.emptyTitle}>No Active Recruitment Posts</Text>
+                  <Text style={styles.emptyText}>Create your first recruitment post to find cleaners for your team</Text>
                 </View>
-                
-                {/* Property list */}
-                {recruitment.properties.map((prop, index) => (
-                  <Text key={index} style={styles.propertyText} numberOfLines={1}>
-                    • {prop.label || prop.address}
-                  </Text>
-                ))}
-                
-                {/* Services needed */}
-                {recruitment.servicesNeeded && recruitment.servicesNeeded.length > 0 && (
-                  <View style={styles.servicesRow}>
-                    {recruitment.servicesNeeded.slice(0, 3).map((service, index) => (
-                      <View key={index} style={styles.serviceChip}>
-                        <Text style={styles.serviceChipText}>{service}</Text>
-                      </View>
-                    ))}
-                    {recruitment.servicesNeeded.length > 3 && (
-                      <Text style={styles.moreText}>+{recruitment.servicesNeeded.length - 3} more</Text>
-                    )}
-                  </View>
-                )}
-                
-                <View style={styles.cardFooter}>
-                  <View style={styles.infoRow}>
-                    <Ionicons name="pricetag-outline" size={16} color="#64748B" />
-                    <Text style={styles.infoText}>
-                      {recruitment.bids?.length || 0} bids
-                    </Text>
-                  </View>
-                </View>
-                
-                {recruitment.status === 'open' && (
+              ) : (
+                myRecruitments.map((recruitment, index) => (
                   <TouchableOpacity
-                    style={styles.closeButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleCloseRecruitment(recruitment.id);
+                    key={recruitment.id}
+                    style={[
+                      styles.modernRecruitmentCard,
+                      index % 2 === 1 && styles.alternateCard
+                    ]}
+                    onPress={() => {
+                      setSelectedRecruitment(recruitment);
+                      setShowBidsModal(true);
                     }}
                   >
-                    <Text style={styles.closeButtonText}>Close Post</Text>
+                    <View style={styles.modernCardHeader}>
+                      <View style={styles.modernCardIcon}>
+                        <Ionicons name="people" size={18} color="#10B981" />
+                      </View>
+                      <View style={styles.modernCardTitleSection}>
+                        <Text style={styles.modernCardTitle}>Team Recruitment</Text>
+                        <Text style={styles.modernCardSubtitle}>
+                          {recruitment.servicesNeeded?.join(', ') || 'Standard Cleaning'}
+                        </Text>
+                      </View>
+                      <View style={styles.modernStatusBadge}>
+                        <Text style={styles.modernStatusText}>ACTIVE</Text>
+                      </View>
+                    </View>
+                    
+                    {/* Property Details */}
+                    <View style={styles.modernPropertySection}>
+                      {recruitment.properties.slice(0, 2).map((prop, index) => (
+                        <View key={index} style={styles.modernPropertyItem}>
+                          <Ionicons name="location" size={14} color="#64748B" />
+                          <Text style={styles.modernPropertyText} numberOfLines={1}>
+                            {prop.label || prop.address}
+                          </Text>
+                        </View>
+                      ))}
+                      {recruitment.properties.length > 2 && (
+                        <Text style={styles.morePropertiesText}>
+                          +{recruitment.properties.length - 2} more properties
+                        </Text>
+                      )}
+                    </View>
+                    
+                    {/* Services and Stats */}
+                    <View style={styles.modernStatsSection}>
+                      <View style={styles.modernStatItem}>
+                        <Ionicons name="briefcase" size={14} color="#10B981" />
+                        <Text style={styles.modernStatText}>
+                          {recruitment.servicesNeeded?.join(', ') || 'Standard Cleaning'}
+                        </Text>
+                      </View>
+                      <View style={styles.modernStatItem}>
+                        <Ionicons name="pricetag" size={14} color="#F59E0B" />
+                        <Text style={styles.modernStatText}>
+                          {recruitment.bids?.length || 0} bids received
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.modernCardActions}>
+                      <TouchableOpacity
+                        style={styles.modernViewBidsButton}
+                        onPress={() => {
+                          setSelectedRecruitment(recruitment);
+                          setShowBidsModal(true);
+                        }}
+                      >
+                        <Ionicons name="eye" size={16} color="#10B981" />
+                        <Text style={styles.modernViewBidsText}>View Bids</Text>
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity
+                        style={styles.modernCloseButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleCloseRecruitment(recruitment.id);
+                        }}
+                      >
+                        <Text style={styles.modernCloseButtonText}>Close Post</Text>
+                      </TouchableOpacity>
+                    </View>
                   </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-            ))
+                ))
+              )}
+            </>
+          ) : (
+            /* Archive View */
+            <>
+              <View style={styles.archiveHeader}>
+                <Ionicons name="archive" size={20} color="#64748B" />
+                <Text style={styles.archiveTitle}>Completed & Closed Posts</Text>
+              </View>
+              
+              {/* Archived Emergency Jobs */}
+              {archivedEmergencyJobs.length > 0 && (
+                <>
+                  <Text style={styles.archiveSectionTitle}>Emergency Cleanings</Text>
+                  {archivedEmergencyJobs.map(job => (
+                    <View key={job.id} style={styles.archivedEmergencyCard}>
+                      <View style={styles.archivedCardHeader}>
+                        <View style={styles.archivedEmergencyIcon}>
+                          <Ionicons name="flash" size={16} color="#64748B" />
+                        </View>
+                        <View style={styles.archivedCardContent}>
+                          <Text style={styles.archivedCardTitle}>Emergency Cleaning</Text>
+                          <Text style={styles.archivedCardAddress}>{job.address}</Text>
+                        </View>
+                        <View style={[styles.archivedStatusBadge, 
+                          job.status === 'completed' && styles.completedBadge,
+                          job.status === 'cancelled' && styles.cancelledBadge,
+                          job.status === 'assigned' && styles.assignedBadge
+                        ]}>
+                          <Text style={styles.archivedStatusText}>
+                            {job.status.toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.archivedCardDetails}>
+                        <Text style={styles.archivedCardDate}>
+                          {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'No date'}
+                        </Text>
+                        {job.assignedCleanerName && (
+                          <Text style={styles.archivedCardCleaner}>
+                            Cleaner: {job.assignedCleanerName}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </>
+              )}
+              
+              {/* Archived Regular Recruitments */}
+              {archivedRecruitments.length > 0 && (
+                <>
+                  <Text style={styles.archiveSectionTitle}>Team Recruitments</Text>
+                  {archivedRecruitments.map(recruitment => (
+                    <TouchableOpacity
+                      key={recruitment.id}
+                      style={styles.archivedRecruitmentCard}
+                      onPress={() => {
+                        setSelectedRecruitment(recruitment);
+                        setShowBidsModal(true);
+                      }}
+                    >
+                      <View style={styles.archivedCardHeader}>
+                        <View style={styles.archivedRecruitmentIcon}>
+                          <Ionicons name="people" size={16} color="#64748B" />
+                        </View>
+                        <View style={styles.archivedCardContent}>
+                          <Text style={styles.archivedCardTitle}>Team Recruitment</Text>
+                          <Text style={styles.archivedCardSubtitle}>
+                            {recruitment.properties.length} {recruitment.properties.length === 1 ? 'Property' : 'Properties'}
+                          </Text>
+                        </View>
+                        <View style={styles.archivedStatusBadge}>
+                          <Text style={styles.archivedStatusText}>CLOSED</Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.archivedCardDetails}>
+                        <Text style={styles.archivedCardStats}>
+                          {recruitment.bids?.length || 0} bids • {recruitment.servicesNeeded?.join(', ') || 'Standard Cleaning'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              )}
+              
+              {archivedRecruitments.length === 0 && archivedEmergencyJobs.length === 0 && (
+                <View style={styles.emptyState}>
+                  <Ionicons name="archive-outline" size={48} color="#CBD5E1" />
+                  <Text style={styles.emptyTitle}>No Archived Posts</Text>
+                  <Text style={styles.emptyText}>Completed and closed recruitment posts will appear here</Text>
+                </View>
+              )}
+            </>
           )}
         </View>
       </ScrollView>
@@ -1138,12 +1292,12 @@ export function SearchCleanersScreen({ navigation }: any) {
       {/* Bids Modal */}
       <Modal
         visible={showBidsModal}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setShowBidsModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <View style={styles.bidsModalOverlay}>
+          <View style={styles.bidsModalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 Bids for {selectedRecruitment?.properties.length} {selectedRecruitment?.properties.length === 1 ? 'Property' : 'Properties'}
@@ -1168,9 +1322,6 @@ export function SearchCleanersScreen({ navigation }: any) {
                               ? bid.cleanerName 
                               : bid.cleanerEmail?.split('@')[0] || 'Cleaner'}
                         </Text>
-                        {bid.cleanerEmail && (
-                          <Text style={styles.bidderEmail}>{bid.cleanerEmail}</Text>
-                        )}
                       </View>
                       <Text style={styles.bidAmount}>
                         ${bid.flatFee}/job
@@ -1282,6 +1433,9 @@ const styles = StyleSheet.create({
   section: {
     padding: 16,
   },
+  sectionWithBottomPadding: {
+    paddingBottom: 100, // Extra padding to prevent tab overlap
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
@@ -1290,9 +1444,9 @@ const styles = StyleSheet.create({
   },
   recruitmentCard: {
     backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
@@ -1860,5 +2014,347 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#991B1B',
     fontStyle: 'italic',
+  },
+  emergencyJobContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  emergencyStatusBadge: {
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    minWidth: 50,
+    maxWidth: 70,
+    borderWidth: 1,
+    borderColor: '#991B1B',
+  },
+  emergencyStatusText: {
+    fontSize: 8,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  emergencyJobHeaderSection: {
+    marginBottom: 8,
+  },
+  emergencyJobTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  
+  // New modern styles
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  archiveToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: 'white',
+  },
+  archiveToggleActive: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#10B981',
+  },
+  archiveToggleText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  archiveToggleTextActive: {
+    color: '#10B981',
+  },
+  
+  // Empty state styles
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#374151',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  
+  // Modern recruitment card styles
+  modernRecruitmentCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  alternateCard: {
+    backgroundColor: '#FAFBFC',
+  },
+  modernCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modernCardIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F0FDF4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  modernCardTitleSection: {
+    flex: 1,
+  },
+  modernCardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  modernCardSubtitle: {
+    fontSize: 14,
+    color: '#64748B',
+  },
+  modernStatusBadge: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  modernStatusText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  modernPropertySection: {
+    marginBottom: 16,
+  },
+  modernPropertyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modernPropertyText: {
+    fontSize: 14,
+    color: '#374151',
+    marginLeft: 8,
+    flex: 1,
+  },
+  morePropertiesText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontStyle: 'italic',
+    marginLeft: 22,
+  },
+  modernStatsSection: {
+    marginBottom: 16,
+  },
+  modernStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modernStatText: {
+    fontSize: 13,
+    color: '#374151',
+    marginLeft: 8,
+  },
+  modernCardActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modernViewBidsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#10B981',
+  },
+  modernViewBidsText: {
+    color: '#10B981',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  modernCloseButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#FEF2F2',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  modernCloseButtonText: {
+    color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  
+  // Archive styles
+  archiveHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  archiveTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748B',
+    marginLeft: 8,
+  },
+  archiveSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#374151',
+    marginTop: 20,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  
+  // Archived card styles
+  archivedEmergencyCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  archivedRecruitmentCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  archivedCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  archivedEmergencyIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  archivedRecruitmentIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  archivedCardContent: {
+    flex: 1,
+  },
+  archivedCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 2,
+  },
+  archivedCardSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  archivedCardAddress: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  archivedStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+  },
+  completedBadge: {
+    backgroundColor: '#DCFCE7',
+  },
+  cancelledBadge: {
+    backgroundColor: '#FEE2E2',
+  },
+  assignedBadge: {
+    backgroundColor: '#DBEAFE',
+  },
+  archivedStatusText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  archivedCardDetails: {
+    marginTop: 8,
+  },
+  archivedCardDate: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 4,
+  },
+  archivedCardCleaner: {
+    fontSize: 12,
+    color: '#374151',
+    fontWeight: '500',
+  },
+  archivedCardStats: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  
+  // Bids modal styles (centered)
+  bidsModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  bidsModalContent: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '80%',
   },
 });

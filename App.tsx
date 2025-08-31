@@ -2010,170 +2010,187 @@ function HostHomeScreen({ navigation }: any) {
         </View>
       </Modal>
 
-      <ScrollView 
-        style={[styles.screen, { backgroundColor: '#F3F4F6' }]} 
-        contentContainerStyle={{ paddingBottom: 100 }}
-      >
-        {/* Welcome Section */}
-        <View style={{ marginBottom: 20 }}>
-          <Text style={[styles.title, { fontSize: 20 }]}>
-            Welcome back{user?.firstName ? `, ${user.firstName}` : ''}!
-          </Text>
-        </View>
-      
-        {/* Pending Approval Section */}
-        {myPendingJobs.length > 0 && (
-          <View style={{ marginBottom: 20 }}>
-            <View style={[styles.card, {
-              backgroundColor: '#FEF3C7',
-              borderWidth: 2,
-              borderColor: '#F59E0B',
-              padding: 16
-            }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name="alert-circle" size={24} color="#F59E0B" style={{ marginRight: 12 }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600', color: '#92400E' }]}>
-                    {myPendingJobs.length} Pickup{myPendingJobs.length > 1 ? 's' : ''} Pending Approval
-                  </Text>
-                  <Text style={[styles.muted, { fontSize: 12, color: '#92400E', marginTop: 2 }]}>
-                    Tap to review and approve
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                style={[styles.button, { marginTop: 12, backgroundColor: '#F59E0B' }]}
-                onPress={() => setPendingApprovalJobs(myPendingJobs)}
-              >
-                <Text style={styles.buttonText}>Review Now</Text>
-              </TouchableOpacity>
-            </View>
+      <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
+        {/* Sticky Header Section */}
+        <View style={{
+          backgroundColor: '#F3F4F6',
+          paddingHorizontal: 20,
+          paddingTop: 20,
+          paddingBottom: 16,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 4,
+          elevation: 5,
+          zIndex: 1000,
+        }}>
+          {/* Welcome Section */}
+          <View style={{ marginBottom: 16 }}>
+            <Text style={[styles.title, { fontSize: 20 }]}>
+              Welcome back{user?.firstName ? `, ${user.firstName}` : ''}!
+            </Text>
           </View>
-        )}
-
-        {/* Services Section - Moved to top with smaller, more compact icons */}
-        <View style={{ marginBottom: 20 }}>
-          <Text style={[styles.title, { fontSize: 20, marginBottom: 12 }]}>Services</Text>
-          
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 }}>
-            {/* Schedule New Pickup */}
-            <TouchableOpacity
-              style={{
-                width: '48%',
-                margin: '1%',
-                backgroundColor: '#1E88E5',
-                borderRadius: 12,
-                padding: 12,
-                alignItems: 'center',
-                shadowColor: '#1E88E5',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.15,
-                shadowRadius: 4,
-                elevation: 3,
-              }}
-              onPress={() => setShowPickupModal(true)}
-            >
-              <Ionicons name="trash-outline" size={20} color="white" style={{ marginBottom: 4 }} />
-              <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Schedule Pickup</Text>
-            </TouchableOpacity>
-
-            {/* Recruit Cleaners */}
-            <TouchableOpacity
-              style={{
-                width: '48%',
-                margin: '1%',
-                backgroundColor: '#10B981',
-                borderRadius: 12,
-                padding: 12,
-                alignItems: 'center',
-                shadowColor: '#10B981',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.15,
-                shadowRadius: 4,
-                elevation: 3,
-              }}
-              onPress={() => navigation.navigate('SearchCleaners')}
-            >
-              <Ionicons name="people-outline" size={20} color="white" style={{ marginBottom: 4 }} />
-              <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Recruit Cleaners</Text>
-            </TouchableOpacity>
-
-            {/* Schedule Emergency Clean */}
-            <TouchableOpacity
-              style={{
-                width: '48%',
-                margin: '1%',
-                backgroundColor: '#EF4444',
-                borderRadius: 12,
-                padding: 12,
-                alignItems: 'center',
-                shadowColor: '#EF4444',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.15,
-                shadowRadius: 4,
-                elevation: 3,
-              }}
-              onPress={() => setShowEmergencyModal(true)}
-            >
-              <Ionicons name="warning-outline" size={20} color="white" style={{ marginBottom: 4 }} />
-              <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Emergency Clean</Text>
-            </TouchableOpacity>
-
-            {/* Schedule Handyman Services */}
-            <TouchableOpacity
-              style={{
-                width: '48%',
-                margin: '1%',
-                backgroundColor: '#8B5CF6',
-                borderRadius: 12,
-                padding: 12,
-                alignItems: 'center',
-                shadowColor: '#8B5CF6',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.15,
-                shadowRadius: 4,
-                elevation: 3,
-              }}
-              onPress={() => {
-                Alert.alert('Coming Soon', 'Handyman services will be available soon!');
-              }}
-            >
-              <Ionicons name="hammer-outline" size={20} color="white" style={{ marginBottom: 4 }} />
-              <Text style={{ color: 'white', fontSize: 13, fontWeight: '600', textAlign: 'center' }}>Handyman</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
         
-        {/* Next Services Section */}
-        {(() => {
-          // Get start of today (midnight) for cleaning jobs filtering
-          const startOfToday = new Date();
-          startOfToday.setHours(0, 0, 0, 0);
-          
-          const upcomingCleaningJobs = cleaningJobs.filter(j => 
-            j && (j.hostId === user?.uid || j.userId === user?.uid) && 
-            j.preferredDate && j.preferredDate >= startOfToday.getTime() &&
-            (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress')
-          );
-          
-          return (upcomingCleaningJobs.length > 0 || myActiveJobs.length > 0) && (
-          <View style={{ marginBottom: 20 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={[styles.title, { fontSize: 20 }]}>Next Services</Text>
+          {/* Pending Approval Section */}
+          {myPendingJobs.length > 0 && (
+            <View style={{ marginBottom: 16 }}>
+              <View style={[styles.card, {
+                backgroundColor: '#FEF3C7',
+                borderWidth: 2,
+                borderColor: '#F59E0B',
+                padding: 16
+              }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="alert-circle" size={24} color="#F59E0B" style={{ marginRight: 12 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '600', color: '#92400E' }]}>
+                      {myPendingJobs.length} Pickup{myPendingJobs.length > 1 ? 's' : ''} Pending Approval
+                    </Text>
+                    <Text style={[styles.muted, { fontSize: 12, color: '#92400E', marginTop: 2 }]}>
+                      Tap to review and approve
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.button, { marginTop: 12, backgroundColor: '#F59E0B' }]}
+                  onPress={() => setPendingApprovalJobs(myPendingJobs)}
+                >
+                  <Text style={styles.buttonText}>Review Now</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Services Section - Now sticky */}
+          <View style={{ marginBottom: 0 }}>
+            <Text style={[styles.title, { fontSize: 18, marginBottom: 10 }]}>Services</Text>
+            
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 }}>
+              {/* Schedule New Pickup */}
               <TouchableOpacity
-                onPress={() => setShowAllServicesModal(true)}
                 style={{
-                  backgroundColor: '#E3F2FD',
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  borderRadius: 12,
+                  width: '48%',
+                  margin: '1%',
+                  backgroundColor: '#1E88E5',
+                  borderRadius: 10,
+                  padding: 10,
+                  alignItems: 'center',
+                  shadowColor: '#1E88E5',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 4,
+                  elevation: 3,
+                }}
+                onPress={() => setShowPickupModal(true)}
+              >
+                <Ionicons name="trash-outline" size={18} color="white" style={{ marginBottom: 3 }} />
+                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>Schedule Pickup</Text>
+              </TouchableOpacity>
+
+              {/* Recruit Cleaners */}
+              <TouchableOpacity
+                style={{
+                  width: '48%',
+                  margin: '1%',
+                  backgroundColor: '#10B981',
+                  borderRadius: 10,
+                  padding: 10,
+                  alignItems: 'center',
+                  shadowColor: '#10B981',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 4,
+                  elevation: 3,
+                }}
+                onPress={() => navigation.navigate('SearchCleaners')}
+              >
+                <Ionicons name="people-outline" size={18} color="white" style={{ marginBottom: 3 }} />
+                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>Recruit Cleaners</Text>
+              </TouchableOpacity>
+
+              {/* Schedule Emergency Clean */}
+              <TouchableOpacity
+                style={{
+                  width: '48%',
+                  margin: '1%',
+                  backgroundColor: '#EF4444',
+                  borderRadius: 10,
+                  padding: 10,
+                  alignItems: 'center',
+                  shadowColor: '#EF4444',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 4,
+                  elevation: 3,
+                }}
+                onPress={() => setShowEmergencyModal(true)}
+              >
+                <Ionicons name="warning-outline" size={18} color="white" style={{ marginBottom: 3 }} />
+                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>Emergency Clean</Text>
+              </TouchableOpacity>
+
+              {/* Schedule Handyman Services */}
+              <TouchableOpacity
+                style={{
+                  width: '48%',
+                  margin: '1%',
+                  backgroundColor: '#8B5CF6',
+                  borderRadius: 10,
+                  padding: 10,
+                  alignItems: 'center',
+                  shadowColor: '#8B5CF6',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 4,
+                  elevation: 3,
+                }}
+                onPress={() => {
+                  Alert.alert('Coming Soon', 'Handyman services will be available soon!');
                 }}
               >
-                <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
-                  {upcomingCleaningJobs.length + myActiveJobs.length} upcoming
-                </Text>
+                <Ionicons name="hammer-outline" size={18} color="white" style={{ marginBottom: 3 }} />
+                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>Handyman</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+
+        {/* Scrollable Content */}
+        <ScrollView 
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 100 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Next Services Section */}
+          {(() => {
+            // Get start of today (midnight) for cleaning jobs filtering
+            const startOfToday = new Date();
+            startOfToday.setHours(0, 0, 0, 0);
+            
+            const upcomingCleaningJobs = cleaningJobs.filter(j => 
+              j && (j.hostId === user?.uid || j.userId === user?.uid) && 
+              j.preferredDate && j.preferredDate >= startOfToday.getTime() &&
+              (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress')
+            );
+            
+            return (upcomingCleaningJobs.length > 0 || myActiveJobs.length > 0) && (
+            <View style={{ marginBottom: 20 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <Text style={[styles.title, { fontSize: 20 }]}>Next Services</Text>
+                <TouchableOpacity
+                  onPress={() => setShowAllServicesModal(true)}
+                  style={{
+                    backgroundColor: '#E3F2FD',
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    borderRadius: 12,
+                  }}
+                >
+                  <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
+                    {upcomingCleaningJobs.length + myActiveJobs.length} upcoming
+                  </Text>
+                </TouchableOpacity>
+              </View>
             
             {/* Show upcoming trash services first */}
             {myActiveJobs.slice(0, 2).map(job => (
@@ -2489,21 +2506,22 @@ function HostHomeScreen({ navigation }: any) {
                           key={job.id} 
                           style={[styles.card, { 
                             marginBottom: 8,
-                            paddingVertical: 10,
+                            paddingVertical: 12,
+                            paddingHorizontal: 16,
                             borderLeftWidth: 3,
                             borderLeftColor: (job as any).isEmergency ? '#DC2626' : '#10B981'
                           }]}
                           onPress={() => navigation.navigate('CleaningDetail', { cleaningJobId: job.id })}
                         >
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <View>
-                              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <View style={{ flex: 1, marginRight: 12 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
                                 <View style={{
                                   backgroundColor: (job as any).isEmergency ? '#FEE2E2' : '#F0FDFB',
-                                  paddingHorizontal: 5,
-                                  paddingVertical: 1,
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
                                   borderRadius: 6,
-                                  marginRight: 4,
+                                  marginRight: 6,
                                   borderWidth: 1,
                                   borderColor: (job as any).isEmergency ? '#DC2626' : '#10B981',
                                 }}>
@@ -2511,30 +2529,34 @@ function HostHomeScreen({ navigation }: any) {
                                     {(job as any).isEmergency ? 'EMERGENCY' : 'Cleaning'}
                                   </Text>
                                 </View>
-                                <Text style={[styles.subtitle, { fontSize: 14 }]}>
+                                <Text style={[styles.subtitle, { fontSize: 14, flex: 1 }]} numberOfLines={1}>
                                   {job.property?.label || job.address || 'Property'}
                                 </Text>
                               </View>
                               {job.checkOutDate && (
-                                <Text style={[styles.muted, { fontSize: 11, marginTop: 2 }]}>
+                                <Text style={[styles.muted, { fontSize: 11 }]}>
                                   {new Date(job.checkOutDate).toLocaleDateString()}
                                 </Text>
                               )}
                             </View>
-                            {(job.assignedCleanerName || job.assignedCleanerId || job.cleanerFirstName) ? (
-                              <Ionicons name="checkmark-circle" size={16} color={(job as any).isEmergency ? '#DC2626' : '#10B981'} />
-                            ) : (
-                              <View style={{
-                                backgroundColor: (job as any).isEmergency ? '#FEE2E2' : '#FEF3C7',
-                                paddingHorizontal: 8,
-                                paddingVertical: 3,
-                                borderRadius: 8,
-                              }}>
-                                <Text style={{ fontSize: 10, color: (job as any).isEmergency ? '#DC2626' : '#92400E', fontWeight: '600' }}>
-                                  Needs cleaner
-                                </Text>
-                              </View>
-                            )}
+                            <View style={{ alignItems: 'center', justifyContent: 'center', minWidth: 24 }}>
+                              {(job.assignedCleanerName || job.assignedCleanerId || job.cleanerFirstName) ? (
+                                <Ionicons name="checkmark-circle" size={18} color={(job as any).isEmergency ? '#DC2626' : '#10B981'} />
+                              ) : (
+                                <View style={{
+                                  backgroundColor: (job as any).isEmergency ? '#FEE2E2' : '#FEF3C7',
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 6,
+                                  minWidth: 60,
+                                  alignItems: 'center',
+                                }}>
+                                  <Text style={{ fontSize: 9, color: (job as any).isEmergency ? '#DC2626' : '#92400E', fontWeight: '600' }}>
+                                    Needs cleaner
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
                           </View>
                         </TouchableOpacity>
                       ))}
@@ -2544,10 +2566,11 @@ function HostHomeScreen({ navigation }: any) {
               );
             })()}
           </View>
-          );
-        })()}
+            );
+          })()}
 
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* Emergency Cleaning Modal */}
       <EmergencyCleaningModal

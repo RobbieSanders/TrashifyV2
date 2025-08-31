@@ -12,11 +12,19 @@ import {
   StyleSheet, 
   Animated,
   Dimensions,
-  KeyboardAvoidingView
+  KeyboardAvoidingView,
+  Image
 } from 'react-native';
 // Import slider conditionally for web compatibility
-import Slider from '@react-native-community/slider';
+let Slider: any;
+try {
+  Slider = require('@react-native-community/slider').default;
+} catch (e) {
+  // Fallback for web or if slider is not available
+  Slider = null;
+}
 import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../stores/authStore';
 import { useTrashifyStore } from '../stores/trashifyStore';
 import { useAccountsStore } from '../stores/accountsStore';
@@ -35,7 +43,8 @@ import {
   getDoc,
   limit
 } from 'firebase/firestore';
-import { db } from '../utils/firebase';
+import { db, storage } from '../utils/firebase';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { geocodeAddressCrossPlatform } from '../services/geocodingService';
 import { geocodeAddressWithFallback } from '../services/googleGeocodingService';
 import { getCleanerBidHistory, withdrawBid, subscribeToFilteredRecruitments } from '../services/cleanerRecruitmentService';
@@ -99,6 +108,11 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
   const [openRecruitments, setOpenRecruitments] = useState<CleanerRecruitment[]>([]);
   const [showAllCompletedBids, setShowAllCompletedBids] = useState(false);
   
+  // Profile picture states
+  const [profilePicture, setProfilePicture] = useState<string | null>((user as any)?.profilePicture || null);
+  const [isUploadingPicture, setIsUploadingPicture] = useState(false);
+  const [showImagePicker, setShowImagePicker] = useState(false);
+  
   // Get cleaner-specific stats from assigned cleaning jobs
   const assignedJobs = allJobs.filter(job => 
     job.assignedCleanerId === user?.uid || job.teamCleaners?.includes(user?.uid)
@@ -147,6 +161,7 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       setLastName(user.lastName || '');
       setPhone(user.phone || '');
       setEmail(user.email || '');
+      setProfilePicture((user as any)?.profilePicture || null);
       
       // Initialize service address states
       const profile = user.cleanerProfile as any;
@@ -407,6 +422,242 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Profile Picture Content Validation Rules
+  const PROFILE_PICTURE_RULES = {
+    maxSizeBytes: 5 * 1024 * 1024, // 5MB
+    allowedTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'],
+    maxDimensions: { width: 1024, height: 1024 },
+    minDimensions: { width: 100, height: 100 }
+  };
+
+  // Content validation function
+  const validateImageContent = async (imageUri: string): Promise<{ isValid: boolean; reason?: string }> => {
+    try {
+      // Basic file size and type validation will be done by ImagePicker
+      // For now, we'll implement basic rules. In production, you might want to use
+      // a content moderation service like AWS Rekognition or Google Vision API
+      
+      // Check if image can be loaded (basic validation)
+      return new Promise((resolve) => {
+        Image.getSize(
+          imageUri,
+          (width, height) => {
+            if (width < PROFILE_PICTURE_RULES.minDimensions.width || 
+                height < PROFILE_PICTURE_RULES.minDimensions.height) {
+              resolve({ 
+                isValid: false, 
+                reason: `Image too small. Minimum size is ${PROFILE_PICTURE_RULES.minDimensions.width}x${PROFILE_PICTURE_RULES.minDimensions.height} pixels.` 
+              });
+              return;
+            }
+            
+            // Image is valid
+            resolve({ isValid: true });
+          },
+          (error) => {
+            resolve({ 
+              isValid: false, 
+              reason: 'Invalid image file. Please select a valid image.' 
+            });
+          }
+        );
+      });
+    } catch (error) {
+      return { 
+        isValid: false, 
+        reason: 'Error validating image. Please try again.' 
+      };
+    }
+  };
+
+  // Handle image picker
+  const handleImagePicker = () => {
+    Alert.alert(
+      'Profile Picture',
+      'Choose how you want to add your profile picture',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Camera', onPress: () => openImagePicker('camera') },
+        { text: 'Photo Library', onPress: () => openImagePicker('library') }
+      ]
+    );
+  };
+
+  // Open image picker
+  const openImagePicker = async (source: 'camera' | 'library') => {
+    try {
+      // Request permissions
+      if (source === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Camera permission is required to take photos.');
+          return;
+        }
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Photo library permission is required to select images.');
+          return;
+        }
+      }
+
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1], // Square aspect ratio
+        quality: 0.8,
+        base64: false,
+      };
+
+      let result;
+      if (source === 'camera') {
+        result = await ImagePicker.launchCameraAsync(options);
+      } else {
+        result = await ImagePicker.launchImageLibraryAsync(options);
+      }
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const asset = result.assets[0];
+        
+        // Validate file size
+        if (asset.fileSize && asset.fileSize > PROFILE_PICTURE_RULES.maxSizeBytes) {
+          Alert.alert(
+            'File Too Large', 
+            `Please select an image smaller than ${PROFILE_PICTURE_RULES.maxSizeBytes / (1024 * 1024)}MB.`
+          );
+          return;
+        }
+
+        // Validate content
+        const validation = await validateImageContent(asset.uri);
+        if (!validation.isValid) {
+          Alert.alert('Invalid Image', validation.reason || 'Please select a different image.');
+          return;
+        }
+
+        // Process and upload image
+        await processAndUploadImage(asset.uri);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  };
+
+  // Process and upload image
+  const processAndUploadImage = async (imageUri: string) => {
+    if (!user?.uid) return;
+
+    setIsUploadingPicture(true);
+    try {
+      // Convert to blob for upload (skip resizing for web compatibility)
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+
+      // Create storage reference
+      const imageRef = ref(storage, `profile-pictures/${user.uid}/${Date.now()}.jpg`);
+
+      // Upload to Firebase Storage
+      await uploadBytes(imageRef, blob);
+      
+      // Get download URL
+      const downloadURL = await getDownloadURL(imageRef);
+
+      // Delete old profile picture if it exists
+      if (profilePicture) {
+        try {
+          const oldImageRef = ref(storage, profilePicture);
+          await deleteObject(oldImageRef);
+        } catch (error) {
+          console.log('Could not delete old profile picture:', error);
+        }
+      }
+
+      // Update user profile with new image URL
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, {
+        profilePicture: downloadURL,
+        updatedAt: new Date().toISOString()
+      });
+
+      // Update local state
+      setProfilePicture(downloadURL);
+
+      // Update auth store to reflect changes immediately
+      const authStore = useAuthStore.getState();
+      if (authStore.user) {
+        authStore.setUser({
+          ...authStore.user,
+          profilePicture: downloadURL
+        } as any);
+      }
+
+      Alert.alert('Success', 'Profile picture updated successfully!');
+    } catch (error) {
+      console.error('Error uploading profile picture:', error);
+      Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
+    } finally {
+      setIsUploadingPicture(false);
+    }
+  };
+
+  // Remove profile picture
+  const removeProfilePicture = () => {
+    Alert.alert(
+      'Remove Profile Picture',
+      'Are you sure you want to remove your profile picture?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            if (!user?.uid) return;
+
+            setIsUploadingPicture(true);
+            try {
+              // Delete from Firebase Storage
+              if (profilePicture) {
+                try {
+                  const imageRef = ref(storage, profilePicture);
+                  await deleteObject(imageRef);
+                } catch (error) {
+                  console.log('Could not delete profile picture from storage:', error);
+                }
+              }
+
+              // Update user profile
+              const userDocRef = doc(db, 'users', user.uid);
+              await updateDoc(userDocRef, {
+                profilePicture: null,
+                updatedAt: new Date().toISOString()
+              });
+
+              // Update local state
+              setProfilePicture(null);
+
+              // Update auth store to reflect changes immediately
+              const authStore = useAuthStore.getState();
+              if (authStore.user) {
+                authStore.setUser({
+                  ...authStore.user,
+                  profilePicture: null
+                } as any);
+              }
+
+              Alert.alert('Success', 'Profile picture removed successfully!');
+            } catch (error) {
+              console.error('Error removing profile picture:', error);
+              Alert.alert('Error', 'Failed to remove profile picture. Please try again.');
+            } finally {
+              setIsUploadingPicture(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   // Save service address settings
@@ -1529,13 +1780,61 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
         ]}
       >
         <View style={styles.headerContent}>
-          <View>
-            <Text style={styles.greeting}>
-              Hello, {firstName || 'Cleaner'}! 🧽
-            </Text>
-            <Text style={styles.subtitle}>
-              Manage your cleaning business
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+            {/* Profile Picture in Header */}
+            <TouchableOpacity
+              onPress={handleImagePicker}
+              style={{
+                width: 70,
+                height: 70,
+                borderRadius: 35,
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 16,
+                borderWidth: 3,
+                borderColor: 'rgba(255,255,255,0.4)',
+                overflow: 'hidden',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 8,
+                elevation: 8,
+              }}
+            >
+              {profilePicture ? (
+                <Image
+                  source={{ uri: profilePicture }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    borderRadius: 35,
+                  }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={{ alignItems: 'center' }}>
+                  <Ionicons name="camera" size={28} color="rgba(255,255,255,0.8)" />
+                  <Text style={{
+                    fontSize: 10,
+                    color: 'rgba(255,255,255,0.8)',
+                    marginTop: 2,
+                    fontWeight: '600',
+                  }}>
+                    Add
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            
+            <View style={{ flex: 1 }}>
+              <Text style={styles.greeting}>
+                Hello, {firstName || 'Cleaner'}! 🧽
+              </Text>
+              <Text style={styles.subtitle}>
+                Manage your cleaning business
+              </Text>
+            </View>
           </View>
           <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
             <Text style={styles.signOutText}>Sign Out</Text>
@@ -2133,6 +2432,112 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionTitle}>Personal Information</Text>
                 
+                {/* Profile Picture Section */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Profile Picture</Text>
+                  <View style={{
+                    alignItems: 'center',
+                    marginBottom: 16,
+                  }}>
+                    <TouchableOpacity
+                      onPress={handleImagePicker}
+                      disabled={isUploadingPicture}
+                      style={{
+                        width: 120,
+                        height: 120,
+                        borderRadius: 60,
+                        backgroundColor: '#f0f0f0',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginBottom: 12,
+                        borderWidth: 3,
+                        borderColor: '#10B981',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {isUploadingPicture ? (
+                        <ActivityIndicator size="large" color="#10B981" />
+                      ) : profilePicture ? (
+                        <Image
+                          source={{ uri: profilePicture }}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            borderRadius: 60,
+                          }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={{ alignItems: 'center' }}>
+                          <Ionicons name="camera" size={32} color="#10B981" />
+                          <Text style={{
+                            fontSize: 12,
+                            color: '#10B981',
+                            marginTop: 4,
+                            textAlign: 'center',
+                          }}>
+                            Add Photo
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                    
+                    {profilePicture && !isUploadingPicture && (
+                      <TouchableOpacity
+                        onPress={removeProfilePicture}
+                        style={{
+                          backgroundColor: '#ffebee',
+                          paddingHorizontal: 16,
+                          paddingVertical: 8,
+                          borderRadius: 20,
+                          borderWidth: 1,
+                          borderColor: '#f44336',
+                        }}
+                      >
+                        <Text style={{
+                          color: '#f44336',
+                          fontSize: 12,
+                          fontWeight: '600',
+                        }}>
+                          Remove Photo
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  
+                  {/* Profile Picture Guidelines */}
+                  <View style={{
+                    backgroundColor: '#f8f9fa',
+                    padding: 12,
+                    borderRadius: 8,
+                    marginBottom: 16,
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                      <Ionicons name="information-circle" size={16} color="#10B981" />
+                      <Text style={{
+                        fontSize: 12,
+                        fontWeight: '600',
+                        color: '#10B981',
+                        marginLeft: 6,
+                      }}>
+                        Profile Picture Guidelines
+                      </Text>
+                    </View>
+                    <Text style={{
+                      fontSize: 11,
+                      color: '#666',
+                      lineHeight: 16,
+                    }}>
+                      • Must be appropriate and professional{'\n'}
+                      • No explicit, offensive, or inappropriate content{'\n'}
+                      • Clear photo of yourself (no logos, text, or graphics){'\n'}
+                      • Minimum size: 100x100 pixels{'\n'}
+                      • Maximum file size: 5MB{'\n'}
+                      • Supported formats: JPG, PNG, WebP
+                    </Text>
+                  </View>
+                </View>
+                
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>First Name</Text>
                   <TextInput
@@ -2318,21 +2723,23 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
                         </View>
                       </View>
                     ) : (
-                      <Slider
-                        style={styles.slider}
-                        minimumValue={1}
-                        maximumValue={useMetric ? 160 : 100}
-                        value={useMetric ? serviceRadiusKm : serviceRadiusMiles}
-                        onValueChange={(value) => {
-                          if (useMetric) {
-                            handleKmChange(Math.round(value));
-                          } else {
-                            handleMilesChange(Math.round(value));
-                          }
-                        }}
-                        minimumTrackTintColor="#10B981"
-                        maximumTrackTintColor="#e0e0e0"
-                      />
+                      Slider && (
+                        <Slider
+                          style={styles.slider}
+                          minimumValue={1}
+                          maximumValue={useMetric ? 160 : 100}
+                          value={useMetric ? serviceRadiusKm : serviceRadiusMiles}
+                          onValueChange={(value: number) => {
+                            if (useMetric) {
+                              handleKmChange(Math.round(value));
+                            } else {
+                              handleMilesChange(Math.round(value));
+                            }
+                          }}
+                          minimumTrackTintColor="#10B981"
+                          maximumTrackTintColor="#e0e0e0"
+                        />
+                      )
                     )}
                     
                     <View style={styles.sliderLabels}>
