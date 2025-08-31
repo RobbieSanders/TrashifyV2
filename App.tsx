@@ -60,31 +60,63 @@ function HeaderIcons({ navigation }: any) {
   };
 
   return (
-    <View style={{ flexDirection: 'row', marginRight: 16 }}>
-      <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={{ marginRight: 16 }}>
-        <View>
-          <Ionicons name="notifications-outline" size={24} color="#0F172A" />
-          {unreadCount > 0 && (
-            <View style={{
-              position: 'absolute',
-              top: -4,
-              right: -4,
-              backgroundColor: '#EF4444',
-              borderRadius: 10,
-              minWidth: 20,
-              height: 20,
-              justifyContent: 'center',
-              alignItems: 'center',
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, gap: 12 }}>
+      <TouchableOpacity 
+        onPress={() => navigation.navigate('Notifications')} 
+        style={{ 
+          position: 'relative',
+          padding: 8,
+          borderRadius: 12,
+          backgroundColor: unreadCount > 0 ? '#FEF2F2' : 'transparent',
+        }}
+        activeOpacity={0.7}
+      >
+        <Ionicons 
+          name={unreadCount > 0 ? "notifications" : "notifications-outline"} 
+          size={24} 
+          color={unreadCount > 0 ? "#DC2626" : "#475569"} 
+        />
+        {unreadCount > 0 && (
+          <View style={{
+            position: 'absolute',
+            top: 2,
+            right: 2,
+            backgroundColor: '#DC2626',
+            borderRadius: 12,
+            minWidth: 20,
+            height: 20,
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 2,
+            borderColor: '#FFFFFF',
+            shadowColor: '#DC2626',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.3,
+            shadowRadius: 4,
+            elevation: 4,
+          }}>
+            <Text style={{ 
+              color: 'white', 
+              fontSize: 10, 
+              fontWeight: '800',
+              letterSpacing: -0.2
             }}>
-              <Text style={{ color: 'white', fontSize: 10, fontWeight: 'bold' }}>
-                {unreadCount}
-              </Text>
-            </View>
-          )}
-        </View>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate(getProfileRoute())}>
-        <Ionicons name="person-circle-outline" size={24} color="#0F172A" />
+      
+      <TouchableOpacity 
+        onPress={() => navigation.navigate(getProfileRoute())}
+        style={{
+          padding: 8,
+          borderRadius: 12,
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        }}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="person-circle" size={24} color="#3B82F6" />
       </TouchableOpacity>
     </View>
   );
@@ -119,9 +151,47 @@ export default function App() {
   if (loading) {
     return (
       <SafeAreaProvider>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F3F4F6' }}>
-          <ActivityIndicator size="large" color="#1E88E5" />
-          <Text style={{ marginTop: 16, color: '#64748B' }}>Loading...</Text>
+        <View style={{ 
+          flex: 1, 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          backgroundColor: '#F8FAFC',
+          padding: 20
+        }}>
+          <View style={{
+            backgroundColor: '#FFFFFF',
+            borderRadius: 20,
+            padding: 40,
+            alignItems: 'center',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.1,
+            shadowRadius: 12,
+            elevation: 8,
+            minWidth: 200,
+          }}>
+            <CleeviLogo size="large" />
+            <View style={{ marginTop: 24, marginBottom: 16 }}>
+              <ActivityIndicator size="large" color="#3B82F6" />
+            </View>
+            <Text style={{ 
+              fontSize: 18, 
+              fontWeight: '600', 
+              color: '#1E293B',
+              marginBottom: 8,
+              textAlign: 'center'
+            }}>
+              Loading your workspace
+            </Text>
+            <Text style={{ 
+              fontSize: 14, 
+              color: '#64748B',
+              textAlign: 'center',
+              lineHeight: 20
+            }}>
+              Setting up your personalized experience
+            </Text>
+          </View>
         </View>
       </SafeAreaProvider>
     );
@@ -202,32 +272,54 @@ function AdminStack() {
 function AdminTabs() {
   return (
     <Tab.Navigator
-      screenOptions={({ route }: any) => ({
+      screenOptions={({ route, focused }: any) => ({
         headerShown: false,
-        tabBarActiveTintColor: '#1E88E5',
+        tabBarActiveTintColor: '#3B82F6',
         tabBarInactiveTintColor: '#94A3B8',
         tabBarStyle: {
           position: 'absolute',
           bottom: 0,
           left: 0,
           right: 0,
-          elevation: 0,
-          backgroundColor: '#ffffff',
-          borderTopColor: '#E5E7EB',
-          height: Platform.OS === 'ios' ? 75 : 60,
-          paddingBottom: Platform.OS === 'ios' ? 15 : 5,
-          paddingTop: 10,
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#F1F5F9',
+          height: Platform.OS === 'ios' ? 85 : 70,
+          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+          paddingTop: 12,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 8,
+          elevation: 8,
         },
-        tabBarIcon: ({ color, size }: { color: string; size: number }) => {
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+          letterSpacing: 0.2,
+        },
+        tabBarIcon: ({ color, size, focused }: { color: string; size: number; focused: boolean }) => {
           let icon = 'help';
-          if (route.name === 'Home') icon = 'home';
-          else if (route.name === 'Cleaning') icon = 'calendar';
-          else if (route.name === 'Handyman') icon = 'hammer';
-          else if (route.name === 'Trash Services') icon = 'trash';
-          else if (route.name === 'My Teams') icon = 'people';
-          else if (route.name === 'Properties') icon = 'business';
-          else if (route.name === 'More') icon = 'ellipsis-horizontal';
-          return <Ionicons name={icon as any} size={size} color={color} />;
+          if (route.name === 'Home') icon = focused ? 'home' : 'home-outline';
+          else if (route.name === 'Cleaning') icon = focused ? 'calendar' : 'calendar-outline';
+          else if (route.name === 'Handyman') icon = focused ? 'hammer' : 'hammer-outline';
+          else if (route.name === 'Trash Services') icon = focused ? 'trash' : 'trash-outline';
+          else if (route.name === 'My Teams') icon = focused ? 'people' : 'people-outline';
+          else if (route.name === 'Properties') icon = focused ? 'business' : 'business-outline';
+          else if (route.name === 'More') icon = focused ? 'ellipsis-horizontal' : 'ellipsis-horizontal-outline';
+          
+          return (
+            <View style={{
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              backgroundColor: focused ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+            }}>
+              <Ionicons name={icon as any} size={size} color={color} />
+            </View>
+          );
         },
       })}
     >
@@ -273,37 +365,59 @@ function HostTabs() {
   
   return (
     <Tab.Navigator
-      screenOptions={({ route }: any) => ({
+      screenOptions={({ route, focused }: any) => ({
         headerShown: false,
-        tabBarActiveTintColor: '#1E88E5',
+        tabBarActiveTintColor: '#3B82F6',
         tabBarInactiveTintColor: '#94A3B8',
         tabBarStyle: {
           position: 'absolute',
           bottom: 0,
           left: 0,
           right: 0,
-          elevation: 0,
-          backgroundColor: '#ffffff',
-          borderTopColor: '#E5E7EB',
-          height: Platform.OS === 'ios' ? 75 : 60,
-          paddingBottom: Platform.OS === 'ios' ? 15 : 5,
-          paddingTop: 10,
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#F1F5F9',
+          height: Platform.OS === 'ios' ? 85 : 70,
+          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+          paddingTop: 12,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 8,
+          elevation: 8,
         },
-        tabBarIcon: ({ color, size }: { color: string; size: number }) => {
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+          letterSpacing: 0.2,
+        },
+        tabBarIcon: ({ color, size, focused }: { color: string; size: number; focused: boolean }) => {
           let icon = 'help';
-          if (route.name === 'Home') icon = 'home';
-          else if (route.name === 'Cleaning') icon = 'calendar';
-          else if (route.name === 'Handyman Services') icon = 'hammer';
-          else if (route.name === 'Trash Services') icon = 'trash';
-          else if (route.name === 'My Teams') icon = 'people';
-          else if (route.name === 'More') icon = 'ellipsis-horizontal';
-          return <Ionicons name={icon as any} size={size} color={color} />;
+          if (route.name === 'Home') icon = focused ? 'home' : 'home-outline';
+          else if (route.name === 'Cleaning') icon = focused ? 'calendar' : 'calendar-outline';
+          else if (route.name === 'Handyman Services') icon = focused ? 'hammer' : 'hammer-outline';
+          else if (route.name === 'Trash Services') icon = focused ? 'trash' : 'trash-outline';
+          else if (route.name === 'My Teams') icon = focused ? 'people' : 'people-outline';
+          else if (route.name === 'More') icon = focused ? 'ellipsis-horizontal' : 'ellipsis-horizontal-outline';
+          
+          return (
+            <View style={{
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              backgroundColor: focused ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+            }}>
+              <Ionicons name={icon as any} size={size} color={color} />
+            </View>
+          );
         },
       })}
     >
       <Tab.Screen name="Home" component={HostOnlyStack} />
       <Tab.Screen name="Cleaning" component={CleaningStack} />
-      <Tab.Screen name="Handyman" component={HandymanServicesStack} />
+      <Tab.Screen name="Handyman Services" component={HandymanServicesStack} />
       <Tab.Screen name="Trash Services" component={TrashServicesStack} />
       <Tab.Screen name="More" component={MoreStack} />
     </Tab.Navigator>
@@ -2555,28 +2669,50 @@ function WorkerSettingsStack() {
 function WorkerTabs() {
   return (
     <WorkerTab.Navigator
-      screenOptions={({ route }: any) => ({
+      screenOptions={({ route, focused }: any) => ({
         headerShown: false,
-        tabBarActiveTintColor: '#1E88E5',
+        tabBarActiveTintColor: '#3B82F6',
         tabBarInactiveTintColor: '#94A3B8',
         tabBarStyle: {
           position: 'absolute',
           bottom: 0,
           left: 0,
           right: 0,
-          elevation: 0,
-          backgroundColor: '#ffffff',
-          borderTopColor: '#E5E7EB',
-          height: Platform.OS === 'ios' ? 75 : 60,
-          paddingBottom: Platform.OS === 'ios' ? 15 : 5,
-          paddingTop: 10,
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#F1F5F9',
+          height: Platform.OS === 'ios' ? 85 : 70,
+          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+          paddingTop: 12,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 8,
+          elevation: 8,
         },
-        tabBarIcon: ({ color, size }: { color: string; size: number }) => {
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+          letterSpacing: 0.2,
+        },
+        tabBarIcon: ({ color, size, focused }: { color: string; size: number; focused: boolean }) => {
           let icon = 'help';
-          if (route.name === 'Home') icon = 'briefcase';
-          else if (route.name === 'History') icon = 'time';
-          else if (route.name === 'Settings') icon = 'settings';
-          return <Ionicons name={icon as any} size={size} color={color} />;
+          if (route.name === 'Home') icon = focused ? 'briefcase' : 'briefcase-outline';
+          else if (route.name === 'History') icon = focused ? 'time' : 'time-outline';
+          else if (route.name === 'Settings') icon = focused ? 'settings' : 'settings-outline';
+          
+          return (
+            <View style={{
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              backgroundColor: focused ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+            }}>
+              <Ionicons name={icon as any} size={size} color={color} />
+            </View>
+          );
         },
       })}
     >
@@ -2591,28 +2727,50 @@ function WorkerTabs() {
 function CleanerTabs() {
   return (
     <Tab.Navigator
-      screenOptions={({ route }: any) => ({
+      screenOptions={({ route, focused }: any) => ({
         headerShown: false,
-        tabBarActiveTintColor: '#1E88E5',
+        tabBarActiveTintColor: '#3B82F6',
         tabBarInactiveTintColor: '#94A3B8',
         tabBarStyle: {
           position: 'absolute',
           bottom: 0,
           left: 0,
           right: 0,
-          elevation: 0,
-          backgroundColor: '#ffffff',
-          borderTopColor: '#E5E7EB',
-          height: Platform.OS === 'ios' ? 75 : 60,
-          paddingBottom: Platform.OS === 'ios' ? 15 : 5,
-          paddingTop: 10,
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#F1F5F9',
+          height: Platform.OS === 'ios' ? 85 : 70,
+          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+          paddingTop: 12,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 8,
+          elevation: 8,
         },
-        tabBarIcon: ({ color, size }: { color: string; size: number }) => {
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+          letterSpacing: 0.2,
+        },
+        tabBarIcon: ({ color, size, focused }: { color: string; size: number; focused: boolean }) => {
           let icon = 'help';
-          if (route.name === 'Active') icon = 'briefcase';
-          else if (route.name === 'Bids') icon = 'pricetag';
-          else if (route.name === 'Profile') icon = 'person';
-          return <Ionicons name={icon as any} size={size} color={color} />;
+          if (route.name === 'Active') icon = focused ? 'briefcase' : 'briefcase-outline';
+          else if (route.name === 'Bids') icon = focused ? 'pricetag' : 'pricetag-outline';
+          else if (route.name === 'Profile') icon = focused ? 'person' : 'person-outline';
+          
+          return (
+            <View style={{
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              backgroundColor: focused ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+            }}>
+              <Ionicons name={icon as any} size={size} color={color} />
+            </View>
+          );
         },
       })}
     >
@@ -3667,7 +3825,24 @@ function WorkerHistoryScreen() {
           {h.completed_at && <Text style={styles.muted}>Completed: {new Date(h.completed_at).toLocaleString()}</Text>}
         </View>
       ))}
-      {workerHistory.length === 0 && <Text style={styles.muted}>No history yet</Text>}
+      {workerHistory.length === 0 && (
+        <View style={[styles.card, { alignItems: 'center', padding: 32, marginTop: 20 }]}>
+          <View style={{
+            backgroundColor: '#E0F2FE',
+            borderRadius: 50,
+            padding: 20,
+            marginBottom: 16,
+          }}>
+            <Ionicons name="time-outline" size={40} color="#0284C7" />
+          </View>
+          <Text style={[styles.title, { fontSize: 18, marginBottom: 8, textAlign: 'center' }]}>
+            No Work History Yet
+          </Text>
+          <Text style={[styles.muted, { textAlign: 'center' }]}>
+            Your completed jobs will appear here once you start working
+          </Text>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -3971,7 +4146,24 @@ function NotificationsScreen() {
           <Text style={[styles.muted, { fontSize: 12 }]}>{new Date(n.createdAt).toLocaleString()}</Text>
         </View>
       ))}
-      {my.length === 0 && <Text style={styles.muted}>No notifications</Text>}
+      {my.length === 0 && (
+        <View style={[styles.card, { alignItems: 'center', padding: 32 }]}>
+          <View style={{
+            backgroundColor: '#E0F2FE',
+            borderRadius: 50,
+            padding: 20,
+            marginBottom: 16,
+          }}>
+            <Ionicons name="notifications-outline" size={40} color="#0284C7" />
+          </View>
+          <Text style={[styles.title, { fontSize: 18, marginBottom: 8, textAlign: 'center' }]}>
+            All Caught Up!
+          </Text>
+          <Text style={[styles.muted, { textAlign: 'center' }]}>
+            You have no new notifications at the moment
+          </Text>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -4648,144 +4840,196 @@ const styles = StyleSheet.create({
   // Top demo container styles used by the initial demo view
   container: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
   },
   screen: {
     flex: 1,
-    padding: 16,
+    padding: 20,
+    backgroundColor: '#F8FAFC',
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#1E293B',
+    letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 14,
-    color: '#334155',
+    fontSize: 16,
+    color: '#475569',
+    fontWeight: '500',
+    lineHeight: 24,
   },
   muted: {
     color: '#64748B',
+    fontSize: 14,
+    lineHeight: 20,
   },
   mapContainer: {
     width: '100%',
     height: '70%',
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   card: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 16,
+    padding: 20,
+    marginVertical: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#F1F5F9',
   },
   label: {
-    fontSize: 12,
-    color: '#334155',
+    fontSize: 14,
+    color: '#374151',
     fontWeight: '600',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    borderWidth: 2,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     backgroundColor: '#FFFFFF',
-    color: '#0F172A',
-    marginTop: 6,
+    color: '#1E293B',
+    fontSize: 16,
+    marginTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   validationText: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#EF4444',
-    marginTop: 4,
+    marginTop: 6,
+    fontWeight: '500',
   },
   button: {
-    backgroundColor: '#1E88E5',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    backgroundColor: '#3B82F6',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     alignItems: 'center',
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   secondaryButton: {
-    backgroundColor: '#E3F2FD',
+    backgroundColor: '#F1F5F9',
+    shadowColor: '#64748B',
+    shadowOpacity: 0.1,
   },
   buttonText: {
     color: 'white',
     fontWeight: '700',
+    fontSize: 16,
+    letterSpacing: 0.3,
   },
   twoPane: {
     flex: 1,
     flexDirection: 'row',
+    gap: 16,
   },
   leftPane: {
     flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   rightPane: {
     flex: 1,
-    padding: 12,
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   rightPaneMobile: {
     flex: 1,
-    padding: 12,
+    padding: 16,
+    backgroundColor: '#F8FAFC',
   },
   value: {
-    fontSize: 16,
-    color: '#0F172A',
-    fontWeight: '600',
+    fontSize: 18,
+    color: '#1E293B',
+    fontWeight: '700',
   },
   badge: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: '#E2E8F0',
-    borderRadius: 9999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   badgeText: {
-    color: '#334155',
+    color: '#475569',
     fontSize: 12,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   footer: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.98)',
+    padding: 20,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
   },
   footerText: {
-    color: '#0F172A',
+    color: '#1E293B',
     fontWeight: '600',
+    fontSize: 16,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 20,
     width: '100%',
-    maxWidth: 400,
+    maxWidth: 420,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 20 },
     shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowRadius: 25,
+    elevation: 20,
     overflow: 'hidden',
-    padding: 24,
+    padding: 28,
   },
 });
