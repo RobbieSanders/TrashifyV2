@@ -92,10 +92,12 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
   
   // Application cards states
   const [myBids, setMyBids] = useState<CleanerBid[]>([]);
+  const [myEmergencyBids, setMyEmergencyBids] = useState<any[]>([]);
   const [loadingBids, setLoadingBids] = useState(true);
   const [showApplicationModal, setShowApplicationModal] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<CleanerBid | null>(null);
   const [openRecruitments, setOpenRecruitments] = useState<CleanerRecruitment[]>([]);
+  const [showAllCompletedBids, setShowAllCompletedBids] = useState(false);
   
   // Get cleaner-specific stats from assigned cleaning jobs
   const assignedJobs = allJobs.filter(job => 
@@ -217,6 +219,30 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       setLoadingBids(false);
     }
   };
+
+  // Load emergency bids for this cleaner
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const emergencyBidsRef = collection(db, 'emergencyBids');
+    const myEmergencyBidsQuery = query(
+      emergencyBidsRef,
+      where('cleanerId', '==', user.uid)
+    );
+    
+    const unsubscribe = onSnapshot(myEmergencyBidsQuery, (snapshot) => {
+      const bids: any[] = [];
+      snapshot.forEach((doc) => {
+        bids.push({ id: doc.id, ...doc.data() });
+      });
+      setMyEmergencyBids(bids);
+    }, (error) => {
+      console.error('[CleanerProfile] Error loading emergency bids:', error);
+      setMyEmergencyBids([]);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   // Handle withdrawing a bid
   const handleWithdrawBid = async (recruitmentId: string, bidId: string) => {
@@ -1367,6 +1393,124 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
     responsibilityStrikethrough: {
       textDecorationLine: 'line-through',
     },
+    // Pending bids section styles
+    pendingBadge: {
+      backgroundColor: '#F59E0B',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 8,
+    },
+    pendingBadgeText: {
+      color: 'white',
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    pendingBidCard: {
+      backgroundColor: 'white',
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: '#E2E8F0',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 3,
+      elevation: 2,
+    },
+    emergencyPendingBidCard: {
+      borderWidth: 2,
+      borderColor: '#FEE2E2',
+      backgroundColor: '#FEF2F2',
+    },
+    pendingBidHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: 12,
+    },
+    pendingBidLeft: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      flex: 1,
+    },
+    pendingBidIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+    },
+    pendingBidInfo: {
+      flex: 1,
+    },
+    pendingBidTitle: {
+      fontSize: 14,
+      fontWeight: '800',
+      color: '#0F172A',
+      marginBottom: 4,
+      letterSpacing: 0.5,
+    },
+    pendingBidSubtitle: {
+      fontSize: 13,
+      color: '#64748B',
+      marginBottom: 4,
+    },
+    pendingBidDate: {
+      fontSize: 11,
+      color: '#64748B',
+    },
+    pendingBidRight: {
+      alignItems: 'flex-end',
+    },
+    pendingBidAmount: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: '#0F172A',
+      marginBottom: 2,
+    },
+    pendingBidAmountLabel: {
+      fontSize: 11,
+      color: '#64748B',
+      fontWeight: '600',
+    },
+    pendingBidMessage: {
+      backgroundColor: '#F8FAFC',
+      padding: 12,
+      borderRadius: 8,
+      marginBottom: 12,
+      borderLeftWidth: 3,
+      borderLeftColor: '#1E88E5',
+    },
+    pendingBidMessageLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: '#334155',
+      marginBottom: 4,
+    },
+    pendingBidMessageText: {
+      fontSize: 13,
+      color: '#475569',
+      lineHeight: 18,
+    },
+    pendingBidWithdrawButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      backgroundColor: '#F1F5F9',
+      borderWidth: 1,
+      borderColor: '#E2E8F0',
+    },
+    pendingBidWithdrawText: {
+      color: '#64748B',
+      fontSize: 12,
+      fontWeight: '600',
+      marginLeft: 4,
+    },
   });
 
   return (
@@ -1493,178 +1637,273 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
             <View style={styles.sectionCard}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <Text style={styles.sectionTitle}>Pending Bids</Text>
-                {!loadingBids && myBids.length > 0 && myBids.some(bid => bid.recruitmentId) && (
-                  <TouchableOpacity style={styles.viewAllButton}>
-                    <Text style={styles.viewAllText}>View All</Text>
-                  </TouchableOpacity>
-                )}
+                <View style={styles.pendingBadge}>
+                  <Text style={styles.pendingBadgeText}>
+                    {myBids.filter(bid => bid.status === 'pending').length + myEmergencyBids.filter(bid => bid.status === 'pending').length} PENDING
+                  </Text>
+                </View>
               </View>
               
-              {pendingBids.length === 0 && (!myBids.length || !myBids.some(bid => bid.recruitmentId)) ? (
+              {myBids.filter(bid => bid.status === 'pending').length === 0 && myEmergencyBids.filter(bid => bid.status === 'pending').length === 0 ? (
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIcon}>
-                    <Ionicons name="document-text-outline" size={40} color="#999" />
+                    <Ionicons name="time-outline" size={40} color="#999" />
                   </View>
-                  <Text style={styles.emptyText}>No pending bids or applications</Text>
-                  <Text style={styles.emptySubtext}>New bid opportunities and applications will appear here</Text>
+                  <Text style={styles.emptyText}>No pending bids</Text>
+                  <Text style={styles.emptySubtext}>Your submitted bids awaiting host responses will appear here</Text>
                 </View>
               ) : (
                 <>
-                  {pendingBids.map((bid) => (
-                    <View key={bid.id} style={styles.bidCard}>
-                      <View style={styles.propertyHeader}>
-                        <View style={styles.propertyInfo}>
-                          <Text style={styles.bidAmount}>${bid.bidAmount || 0}</Text>
-                          <Text style={styles.propertyAddress}>{bid.propertyAddress}</Text>
-                          <Text style={styles.bidStatus}>Pending Response</Text>
+                  {/* Emergency Pending Bids */}
+                  {myEmergencyBids.filter(bid => bid.status === 'pending').map(bid => (
+                    <View key={`emergency-pending-${bid.id}`} style={[styles.pendingBidCard, styles.emergencyPendingBidCard]}>
+                      <View style={styles.pendingBidHeader}>
+                        <View style={styles.pendingBidLeft}>
+                          <View style={[styles.pendingBidIcon, { backgroundColor: '#DC2626' }]}>
+                            <Ionicons name="flash" size={20} color="white" />
+                          </View>
+                          <View style={styles.pendingBidInfo}>
+                            <Text style={[styles.pendingBidTitle, { color: '#DC2626' }]}>EMERGENCY CLEANING</Text>
+                            <Text style={styles.pendingBidSubtitle}>Bid submitted - awaiting response</Text>
+                            <Text style={styles.pendingBidDate}>
+                              Submitted {new Date(bid.bidDate).toLocaleDateString()}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.pendingBidRight}>
+                          <Text style={[styles.pendingBidAmount, { color: '#DC2626' }]}>
+                            ${bid.flatFee}
+                          </Text>
+                          <Text style={styles.pendingBidAmountLabel}>your bid</Text>
                         </View>
                       </View>
+                      
+                      {bid.message && (
+                        <View style={[styles.pendingBidMessage, { backgroundColor: '#FEF2F2', borderColor: '#FEE2E2' }]}>
+                          <Text style={styles.pendingBidMessageLabel}>Your message:</Text>
+                          <Text style={[styles.pendingBidMessageText, { color: '#991B1B' }]} numberOfLines={2}>
+                            {bid.message}
+                          </Text>
+                        </View>
+                      )}
+                      
+                      <TouchableOpacity 
+                        style={[styles.pendingBidWithdrawButton, { backgroundColor: '#FEE2E2', borderColor: '#FECACA' }]}
+                        onPress={async () => {
+                          Alert.alert(
+                            'Withdraw Emergency Bid',
+                            'Are you sure you want to withdraw your emergency cleaning bid?',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              {
+                                text: 'Withdraw',
+                                style: 'destructive',
+                                onPress: async () => {
+                                  try {
+                                    await updateDoc(doc(db, 'emergencyBids', bid.id), {
+                                      status: 'withdrawn',
+                                      withdrawnAt: Date.now()
+                                    });
+                                    Alert.alert('Success', 'Your emergency bid has been withdrawn');
+                                  } catch (error) {
+                                    console.error('Error withdrawing emergency bid:', error);
+                                    Alert.alert('Error', 'Failed to withdraw bid');
+                                  }
+                                }
+                              }
+                            ]
+                          );
+                        }}
+                      >
+                        <Ionicons name="close-circle" size={14} color="#EF4444" />
+                        <Text style={[styles.pendingBidWithdrawText, { color: '#EF4444' }]}>Withdraw Emergency Bid</Text>
+                      </TouchableOpacity>
                     </View>
                   ))}
 
-                  {/* Application Cards integrated into Pending Bids */}
-                  {!loadingBids && myBids.length > 0 && myBids.some(bid => bid.recruitmentId) && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.horizontalScroll, { marginTop: 4 }]}>
-                        {myBids
-                          .filter(bid => bid.recruitmentId)
-                          .slice(0, 5)
-                          .map(bid => (
-                          <TouchableOpacity 
-                            key={bid.id} 
-                            style={styles.applicationCard}
-                            onPress={() => {
-                              setSelectedApplication(bid);
-                              setShowApplicationModal(true);
-                            }}
-                          >
-                            <View style={[styles.applicationStatus,
-                              bid.status === 'accepted' && styles.statusAccepted,
-                              bid.status === 'rejected' && styles.statusRejected,
-                              bid.status === 'pending' && styles.statusPending,
-                              bid.status === 'withdrawn' && styles.statusWithdrawn
-                            ]}>
-                              <Ionicons 
-                                name={
-                                  bid.status === 'accepted' ? 'checkmark-circle' :
-                                  bid.status === 'rejected' ? 'close-circle' :
-                                  bid.status === 'pending' ? 'time' : 'remove-circle'
-                                } 
-                                size={12} 
-                                color="white" 
-                              />
-                              <Text style={styles.applicationStatusText}>
-                                {bid.status === 'pending' ? 'Under Review' : bid.status.charAt(0).toUpperCase() + bid.status.slice(1)}
+                  {/* Regular Team Pending Bids */}
+                  {myBids.filter(bid => bid.status === 'pending').map(bid => {
+                    const recruitment = openRecruitments.find(r => r.id === bid.recruitmentId);
+                    return (
+                      <TouchableOpacity 
+                        key={`regular-pending-${bid.id}`} 
+                        style={styles.pendingBidCard}
+                        onPress={() => {
+                          setSelectedApplication(bid);
+                          setShowApplicationModal(true);
+                        }}
+                      >
+                        <View style={styles.pendingBidHeader}>
+                          <View style={styles.pendingBidLeft}>
+                            <View style={[styles.pendingBidIcon, { backgroundColor: '#1E88E5' }]}>
+                              <Ionicons name="people" size={20} color="white" />
+                            </View>
+                            <View style={styles.pendingBidInfo}>
+                              <Text style={styles.pendingBidTitle}>TEAM APPLICATION</Text>
+                              <Text style={styles.pendingBidSubtitle}>
+                                {recruitment ? `${recruitment.hostName}'s Team` : 'Team application pending'}
+                              </Text>
+                              <Text style={styles.pendingBidDate}>
+                                Submitted {new Date(bid.bidDate).toLocaleDateString()}
                               </Text>
                             </View>
-                            <Text style={styles.applicationAmount}>
-                              ${bid.flatFee || 0}<Text style={styles.applicationAmountSuffix}>/job</Text>
+                          </View>
+                          <View style={styles.pendingBidRight}>
+                            <Text style={styles.pendingBidAmount}>
+                              ${bid.flatFee}/job
                             </Text>
-                            <Text style={styles.applicationDate}>
-                              Applied {new Date(bid.bidDate).toLocaleDateString()}
+                            <Text style={styles.pendingBidAmountLabel}>your rate</Text>
+                          </View>
+                        </View>
+                        
+                        {bid.message && (
+                          <View style={styles.pendingBidMessage}>
+                            <Text style={styles.pendingBidMessageLabel}>Your message:</Text>
+                            <Text style={styles.pendingBidMessageText} numberOfLines={2}>
+                              {bid.message}
                             </Text>
-                            {bid.status === 'pending' && (
-                              <TouchableOpacity
-                                style={styles.withdrawButton}
-                                onPress={(e) => {
-                                  e.stopPropagation();
-                                  handleWithdrawBid(bid.recruitmentId, bid.id);
-                                }}
-                              >
-                                <Text style={styles.withdrawButtonText}>Withdraw</Text>
-                              </TouchableOpacity>
-                            )}
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                  )}
+                          </View>
+                        )}
+                        
+                        <TouchableOpacity 
+                          style={styles.pendingBidWithdrawButton}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleWithdrawBid(bid.recruitmentId, bid.id);
+                          }}
+                        >
+                          <Ionicons name="close-circle" size={14} color="#64748B" />
+                          <Text style={styles.pendingBidWithdrawText}>Withdraw Application</Text>
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </>
               )}
             </View>
             
-            {/* Next Services Section */}
+            {/* Completed Bids Section */}
             <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Next Services</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <Text style={styles.sectionTitle}>Completed Bids</Text>
+                {(() => {
+                  const completedRegularBids = myBids.filter(bid => bid.status === 'accepted');
+                  const completedEmergencyBids = myEmergencyBids.filter((bid: any) => bid.status === 'accepted');
+                  const totalCompleted = completedRegularBids.length + completedEmergencyBids.length;
+                  
+                  return totalCompleted > 2 && (
+                    <TouchableOpacity 
+                      style={styles.viewAllButton}
+                      onPress={() => setShowAllCompletedBids(!showAllCompletedBids)}
+                    >
+                      <Text style={styles.viewAllText}>
+                        {showAllCompletedBids ? 'Show Less' : `View All (${totalCompleted})`}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })()}
+              </View>
+              
               {(() => {
-                const today = new Date();
-                const nextWeek = new Date();
-                nextWeek.setDate(today.getDate() + 7);
+                const completedRegularBids = myBids.filter(bid => bid.status === 'accepted');
+                const completedEmergencyBids = myEmergencyBids.filter((bid: any) => bid.status === 'accepted');
                 
-                const nextServices = assignedJobs.filter(job => {
-                  if (!job.preferredDate) return false;
-                  const jobDate = new Date(job.preferredDate);
-                  return jobDate >= today && jobDate <= nextWeek && 
-                         (job.status === 'assigned' || job.status === 'in_progress' || job.status === 'scheduled');
-                }).sort((a, b) => (a.preferredDate || 0) - (b.preferredDate || 0));
-
-                if (nextServices.length === 0) {
+                if (completedRegularBids.length === 0 && completedEmergencyBids.length === 0) {
                   return (
                     <View style={styles.emptyState}>
                       <View style={styles.emptyIcon}>
-                        <Ionicons name="calendar-outline" size={40} color="#999" />
+                        <Ionicons name="checkmark-circle-outline" size={40} color="#999" />
                       </View>
-                      <Text style={styles.emptyText}>No services in the next 7 days</Text>
-                      <Text style={styles.emptySubtext}>Upcoming assignments will appear here</Text>
+                      <Text style={styles.emptyText}>No completed bids yet</Text>
+                      <Text style={styles.emptySubtext}>Your accepted and completed bids will appear here</Text>
                     </View>
                   );
                 }
 
-                return nextServices.slice(0, 3).map((job) => (
-                  <View key={job.id} style={[
-                    styles.propertyCard, 
-                    job.isEmergency && { 
-                      borderColor: '#DC2626', 
-                      borderWidth: 2, 
-                      backgroundColor: '#FEF2F2',
-                      shadowColor: '#DC2626',
-                      shadowOpacity: 0.15,
-                      shadowRadius: 8,
-                      elevation: 6
-                    }
-                  ]}>
-                    <View style={styles.propertyHeader}>
-                      <View style={styles.propertyInfo}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                          {job.isEmergency && (
-                            <View style={[styles.closeButton, { backgroundColor: '#DC2626', marginRight: 8, width: 24, height: 24 }]}>
-                              <Ionicons name="flash" size={12} color="white" />
+                const allCompletedBids = [
+                  ...completedEmergencyBids.map(bid => ({ ...bid, type: 'emergency' })),
+                  ...completedRegularBids.map(bid => ({ ...bid, type: 'regular' }))
+                ].sort((a, b) => (b.bidDate || 0) - (a.bidDate || 0));
+
+                // Show only 2 items initially, or all if expanded
+                const bidsToShow = showAllCompletedBids ? allCompletedBids : allCompletedBids.slice(0, 2);
+
+                return bidsToShow.map((bid) => {
+                  const isEmergency = bid.type === 'emergency';
+                  const recruitment = isEmergency ? null : openRecruitments.find(r => r.id === bid.recruitmentId);
+                  
+                  return (
+                    <View key={`${bid.type}-${bid.id}`} style={[
+                      styles.propertyCard,
+                      isEmergency && { 
+                        borderColor: '#DC2626', 
+                        borderWidth: 2, 
+                        backgroundColor: '#FEF2F2',
+                        shadowColor: '#DC2626',
+                        shadowOpacity: 0.15,
+                        shadowRadius: 8,
+                        elevation: 6
+                      }
+                    ]}>
+                      <View style={styles.propertyHeader}>
+                        <View style={styles.propertyInfo}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                            <View style={[styles.closeButton, { 
+                              backgroundColor: isEmergency ? '#DC2626' : '#10B981', 
+                              marginRight: 8, 
+                              width: 24, 
+                              height: 24 
+                            }]}>
+                              <Ionicons 
+                                name={isEmergency ? "flash" : "people"} 
+                                size={12} 
+                                color="white" 
+                              />
                             </View>
-                          )}
-                          <Text style={[styles.propertyLabel, job.isEmergency && { color: '#DC2626', fontWeight: '700' }]}>
-                            {job.isEmergency ? 'EMERGENCY CLEANING' : 'Cleaning Service'}
+                            <Text style={[
+                              styles.propertyLabel, 
+                              isEmergency && { color: '#DC2626', fontWeight: '700' }
+                            ]}>
+                              {isEmergency ? 'EMERGENCY CLEANING' : 'TEAM APPLICATION'}
+                            </Text>
+                          </View>
+                          <Text style={[
+                            styles.propertyAddress, 
+                            isEmergency && { color: '#991B1B' }
+                          ]}>
+                            {isEmergency 
+                              ? 'Emergency cleaning job' 
+                              : recruitment 
+                                ? `${recruitment.hostName}'s Team` 
+                                : 'Team application'
+                            }
+                          </Text>
+                          <Text style={[styles.propertyAddress, { 
+                            fontSize: 12, 
+                            color: isEmergency ? '#991B1B' : '#10B981', 
+                            fontWeight: '600' 
+                          }]}>
+                            ${bid.flatFee || 0}{isEmergency ? '/job' : '/job'} • {bid.status === 'accepted' ? 'Accepted' : 'Completed'}
+                          </Text>
+                          <Text style={[styles.propertyAddress, { fontSize: 11, color: '#64748B' }]}>
+                            Applied {new Date(bid.bidDate).toLocaleDateString()}
                           </Text>
                         </View>
-                        <Text style={[styles.propertyAddress, job.isEmergency && { color: '#991B1B' }]}>{job.address}</Text>
-                        <Text style={[styles.propertyAddress, { 
-                          fontSize: 12, 
-                          color: job.isEmergency ? '#991B1B' : '#10B981', 
-                          fontWeight: '600' 
+                        <View style={[styles.closeButton, { 
+                          backgroundColor: bid.status === 'completed' ? '#10B981' : '#059669',
+                          width: 32,
+                          height: 32
                         }]}>
-                          {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'No date'} at {job.preferredTime || '10:00 AM'}
-                        </Text>
-                        {job.isEmergency && job.emergencyReason && (
-                          <Text style={[styles.propertyAddress, { fontSize: 11, color: '#991B1B', fontStyle: 'italic' }]}>
-                            Emergency: {job.emergencyReason}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={[styles.closeButton, { 
-                        backgroundColor: job.isEmergency ? '#DC2626' :
-                                       job.status === 'assigned' ? '#10B981' : 
-                                       job.status === 'in_progress' ? '#F59E0B' : '#64748B',
-                        width: 32,
-                        height: 32
-                      }]}>
-                        <Ionicons 
-                          name={job.isEmergency ? 'flash' :
-                               job.status === 'assigned' ? 'checkmark' : 
-                               job.status === 'in_progress' ? 'time' : 'calendar'} 
-                          size={16} 
-                          color="white" 
-                        />
+                          <Ionicons 
+                            name="checkmark-circle" 
+                            size={16} 
+                            color="white" 
+                          />
+                        </View>
                       </View>
                     </View>
-                  </View>
-                ));
+                  );
+                });
               })()}
             </View>
 
