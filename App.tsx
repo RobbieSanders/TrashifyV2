@@ -50,6 +50,7 @@ function HeaderIcons({ navigation }: any) {
   const user = useAuthStore(s => s.user);
   const { items } = useNotifications();
   const unreadCount = items.filter(i => i.userId === user?.uid && !i.read).length;
+  const [showChatModal, setShowChatModal] = useState(false);
 
   // Determine which profile screen to navigate to based on user role
   const getProfileRoute = () => {
@@ -60,65 +61,74 @@ function HeaderIcons({ navigation }: any) {
   };
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, gap: 12 }}>
-      <TouchableOpacity 
-        onPress={() => navigation.navigate('Notifications')} 
-        style={{ 
-          position: 'relative',
-          padding: 8,
-          borderRadius: 12,
-          backgroundColor: unreadCount > 0 ? '#FEF2F2' : 'transparent',
-        }}
-        activeOpacity={0.7}
-      >
-        <Ionicons 
-          name={unreadCount > 0 ? "notifications" : "notifications-outline"} 
-          size={24} 
-          color={unreadCount > 0 ? "#DC2626" : "#475569"} 
-        />
-        {unreadCount > 0 && (
-          <View style={{
-            position: 'absolute',
-            top: 2,
-            right: 2,
-            backgroundColor: '#DC2626',
+    <>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, gap: 12 }}>
+        <ChatButton onPress={() => setShowChatModal(true)} />
+        
+        <TouchableOpacity 
+          onPress={() => navigation.navigate('Notifications')} 
+          style={{ 
+            position: 'relative',
+            padding: 8,
             borderRadius: 12,
-            minWidth: 20,
-            height: 20,
-            justifyContent: 'center',
-            alignItems: 'center',
-            borderWidth: 2,
-            borderColor: '#FFFFFF',
-            shadowColor: '#DC2626',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.3,
-            shadowRadius: 4,
-            elevation: 4,
-          }}>
-            <Text style={{ 
-              color: 'white', 
-              fontSize: 10, 
-              fontWeight: '800',
-              letterSpacing: -0.2
+            backgroundColor: unreadCount > 0 ? '#FEF2F2' : 'transparent',
+          }}
+          activeOpacity={0.7}
+        >
+          <Ionicons 
+            name={unreadCount > 0 ? "notifications" : "notifications-outline"} 
+            size={24} 
+            color={unreadCount > 0 ? "#DC2626" : "#475569"} 
+          />
+          {unreadCount > 0 && (
+            <View style={{
+              position: 'absolute',
+              top: 2,
+              right: 2,
+              backgroundColor: '#DC2626',
+              borderRadius: 12,
+              minWidth: 20,
+              height: 20,
+              justifyContent: 'center',
+              alignItems: 'center',
+              borderWidth: 2,
+              borderColor: '#FFFFFF',
+              shadowColor: '#DC2626',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.3,
+              shadowRadius: 4,
+              elevation: 4,
             }}>
-              {unreadCount > 99 ? '99+' : unreadCount}
-            </Text>
-          </View>
-        )}
-      </TouchableOpacity>
+              <Text style={{ 
+                color: 'white', 
+                fontSize: 10, 
+                fontWeight: '800',
+                letterSpacing: -0.2
+              }}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          onPress={() => navigation.navigate(getProfileRoute())}
+          style={{
+            padding: 8,
+            borderRadius: 12,
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="person-circle" size={24} color="#3B82F6" />
+        </TouchableOpacity>
+      </View>
       
-      <TouchableOpacity 
-        onPress={() => navigation.navigate(getProfileRoute())}
-        style={{
-          padding: 8,
-          borderRadius: 12,
-          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        }}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="person-circle" size={24} color="#3B82F6" />
-      </TouchableOpacity>
-    </View>
+      <ChatModal 
+        visible={showChatModal} 
+        onClose={() => setShowChatModal(false)} 
+      />
+    </>
   );
 }
 
@@ -235,6 +245,9 @@ import { CleeviLogo } from './components/CleeviLogo';
 import HostProfileScreen from './src/screens/HostProfileScreenModern';
 import CleanerHostProfileScreenModern from './src/screens/CleanerHostProfileScreenModern';
 import { EmergencyCleaningModal } from './src/screens/EmergencyCleaningModal';
+import { ChatButton } from './src/components/ChatButton';
+import { ChatModal } from './src/components/ChatModal';
+import { ChatService } from './src/services/chatService';
 
 // Admin navigation stack
 function AdminStack() {
@@ -2378,45 +2391,99 @@ function HostHomeScreen({ navigation }: any) {
                 <View style={{ 
                   flexDirection: 'row', 
                   alignItems: 'center',
+                  justifyContent: 'space-between',
                   marginTop: 8,
                   paddingTop: 8,
                   borderTopWidth: 1,
                   borderTopColor: '#E5E7EB'
                 }}>
-                  <Ionicons 
-                    name="person" 
-                    size={14} 
-                    color={job.assignedCleanerName || job.cleanerFirstName ? '#10B981' : '#64748B'} 
-                    style={{ marginRight: 6 }} 
-                  />
-                  <Text style={{ fontSize: 13, color: '#64748B' }}>
-                    Cleaner: 
-                  </Text>
-                  {(job.assignedCleanerName || job.cleanerFirstName) ? (
-                    <Text style={{ 
-                      fontSize: 13, 
-                      color: '#10B981', 
-                      fontWeight: '600',
-                      marginLeft: 4
-                    }}>
-                      {job.assignedCleanerName || `${job.cleanerFirstName} ${job.cleanerLastName}`}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                    <Ionicons 
+                      name="person" 
+                      size={14} 
+                      color={job.assignedCleanerName || job.cleanerFirstName ? '#10B981' : '#64748B'} 
+                      style={{ marginRight: 6 }} 
+                    />
+                    <Text style={{ fontSize: 13, color: '#64748B' }}>
+                      Cleaner: 
                     </Text>
-                  ) : (
-                    <TouchableOpacity
-                      onPress={() => navigation.navigate('AssignCleaner', { cleaningJobId: job.id })}
-                      style={{
-                        marginLeft: 4,
-                        flexDirection: 'row',
-                        alignItems: 'center'
-                      }}
-                    >
+                    {(job.assignedCleanerName || job.cleanerFirstName) ? (
                       <Text style={{ 
                         fontSize: 13, 
-                        color: '#1E88E5',
+                        color: '#10B981', 
                         fontWeight: '600',
-                        textDecorationLine: 'underline'
+                        marginLeft: 4
                       }}>
-                        Not assigned yet
+                        {job.assignedCleanerName || `${job.cleanerFirstName} ${job.cleanerLastName}`}
+                      </Text>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={() => navigation.navigate('AssignCleaner', { cleaningJobId: job.id })}
+                        style={{
+                          marginLeft: 4,
+                          flexDirection: 'row',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <Text style={{ 
+                          fontSize: 13, 
+                          color: '#1E88E5',
+                          fontWeight: '600',
+                          textDecorationLine: 'underline'
+                        }}>
+                          Not assigned yet
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  
+                  {/* Chat button for assigned cleaners */}
+                  {(job.assignedCleanerId || job.cleanerId) && (
+                    <TouchableOpacity
+                      onPress={async () => {
+                        try {
+                          const hostName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Host';
+                          const cleanerName = job.assignedCleanerName || `${job.cleanerFirstName || ''} ${job.cleanerLastName || ''}`.trim() || 'Cleaner';
+                          const cleanerId = job.assignedCleanerId || job.cleanerId;
+                          
+                          if (cleanerId) {
+                            const chatId = await ChatService.getOrCreateDirectChat(
+                              user!.uid,
+                              hostName,
+                              'host',
+                              cleanerId,
+                              cleanerName,
+                              'cleaner',
+                              {
+                                title: `Chat with ${cleanerName}`,
+                                cleaningJobId: job.id
+                              }
+                            );
+                            
+                            Alert.alert('Chat Started', `Chat with ${cleanerName} has been created`);
+                          }
+                        } catch (error) {
+                          console.error('Error creating cleaner chat:', error);
+                          Alert.alert('Error', 'Failed to start chat with cleaner');
+                        }
+                      }}
+                      style={{
+                        backgroundColor: '#E0F2FE',
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Ionicons name="chatbubble-outline" size={12} color="#0284C7" />
+                      <Text style={{
+                        color: '#0284C7',
+                        fontSize: 11,
+                        fontWeight: '600',
+                        marginLeft: 4,
+                      }}>
+                        Chat
                       </Text>
                     </TouchableOpacity>
                   )}

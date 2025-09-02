@@ -31,6 +31,8 @@ import { geocodeAddressCrossPlatform } from '../../services/geocodingService';
 import { CleanerRecruitment, CleanerBid, CleaningJob } from '../../utils/types';
 import { calculateDistanceGoogle } from '../../services/googleGeocodingService';
 import { ProfileViewModal } from '../../components/ProfileViewModal';
+import { ChatService } from '../../services/chatService';
+import { ChatModal } from '../../components/ChatModal';
 
 const { width } = Dimensions.get('window');
 
@@ -49,6 +51,10 @@ export function CleanerBiddingScreen({ navigation }: any) {
   const [isSubmittingBid, setIsSubmittingBid] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'turnovers' | 'location'>('newest');
   const [filterBy, setFilterBy] = useState<'all' | 'high-volume' | 'emergency-cleanings'>('all');
+  
+  // Chat modal state
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [chatId, setChatId] = useState<string | null>(null);
   
   // Bid form fields
   const [flatFee, setFlatFee] = useState('');
@@ -1067,35 +1073,125 @@ export function CleanerBiddingScreen({ navigation }: any) {
                   )}
 
                   <View style={styles.cardFooter}>
-                    {!alreadyBid ? (
-                      <TouchableOpacity 
-                        style={[styles.applyButton, isOpeningModal && styles.buttonDisabled]}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleOpenBidModal(recruitment);
-                        }}
-                        disabled={isOpeningModal}
-                      >
-                        {isOpeningModal ? (
-                          <ActivityIndicator color="white" size="small" />
-                        ) : (
-                          <>
-                            <Text style={styles.applyButtonText}>Apply Now</Text>
-                            <Ionicons name="arrow-forward" size={14} color="white" />
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    ) : myBid && myBid.status === 'pending' && (
-                      <TouchableOpacity
-                        style={styles.withdrawCardButton}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleWithdrawBid(recruitment.id, myBid.id);
-                        }}
-                      >
-                        <Text style={styles.withdrawCardButtonText}>Withdraw</Text>
-                      </TouchableOpacity>
-                    )}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {!alreadyBid ? (
+                        <>
+                          <TouchableOpacity 
+                            style={[styles.applyButton, { flex: 1 }, isOpeningModal && styles.buttonDisabled]}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleOpenBidModal(recruitment);
+                            }}
+                            disabled={isOpeningModal}
+                          >
+                            {isOpeningModal ? (
+                              <ActivityIndicator color="white" size="small" />
+                            ) : (
+                              <>
+                                <Text style={styles.applyButtonText}>Apply Now</Text>
+                                <Ionicons name="arrow-forward" size={14} color="white" />
+                              </>
+                            )}
+                          </TouchableOpacity>
+                          
+                          {/* Chat button for clarification */}
+                          <TouchableOpacity
+                            style={{
+                              backgroundColor: '#E0F2FE',
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: '#0284C7',
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                            }}
+                            onPress={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const cleanerName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Cleaner';
+                                const newChatId = await ChatService.getOrCreateBiddingChat(
+                                  recruitment.id,
+                                  recruitment.hostId,
+                                  recruitment.hostName,
+                                  user!.uid,
+                                  cleanerName
+                                );
+                                setChatId(newChatId);
+                                setShowChatModal(true);
+                              } catch (error) {
+                                console.error('Error creating bidding chat:', error);
+                                Alert.alert('Error', 'Failed to start chat');
+                              }
+                            }}
+                          >
+                            <Ionicons name="chatbubble-outline" size={14} color="#0284C7" />
+                            <Text style={{
+                              color: '#0284C7',
+                              fontSize: 12,
+                              fontWeight: '600',
+                              marginLeft: 4,
+                            }}>
+                              Ask Questions
+                            </Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : myBid && myBid.status === 'pending' ? (
+                        <>
+                          <TouchableOpacity
+                            style={[styles.withdrawCardButton, { flex: 1 }]}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleWithdrawBid(recruitment.id, myBid.id);
+                            }}
+                          >
+                            <Text style={styles.withdrawCardButtonText}>Withdraw</Text>
+                          </TouchableOpacity>
+                          
+                          {/* Chat button for pending bids */}
+                          <TouchableOpacity
+                            style={{
+                              backgroundColor: '#E0F2FE',
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: '#0284C7',
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                            }}
+                            onPress={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                const cleanerName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Cleaner';
+                                const chatId = await ChatService.getOrCreateBiddingChat(
+                                  recruitment.id,
+                                  recruitment.hostId,
+                                  recruitment.hostName,
+                                  user!.uid,
+                                  cleanerName,
+                                  myBid.id
+                                );
+                                Alert.alert('Chat Available', `Continue your conversation with ${recruitment.hostName}`);
+                              } catch (error) {
+                                console.error('Error accessing bidding chat:', error);
+                                Alert.alert('Error', 'Failed to access chat');
+                              }
+                            }}
+                          >
+                            <Ionicons name="chatbubble" size={14} color="#0284C7" />
+                            <Text style={{
+                              color: '#0284C7',
+                              fontSize: 12,
+                              fontWeight: '600',
+                              marginLeft: 4,
+                            }}>
+                              Chat
+                            </Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : null}
+                    </View>
                   </View>
                 </TouchableOpacity>
               );
@@ -1825,6 +1921,16 @@ export function CleanerBiddingScreen({ navigation }: any) {
           lastName: '',
           role: 'host'
         }}
+      />
+
+      {/* Chat Modal */}
+      <ChatModal
+        visible={showChatModal}
+        onClose={() => {
+          setShowChatModal(false);
+          setChatId(null);
+        }}
+        initialChatId={chatId || undefined}
       />
     </>
   );

@@ -300,3 +300,55 @@ export interface ActivityLog {
   details?: string;
   changes?: Record<string, any>;
 }
+
+// Chat system types
+export interface ChatMessage {
+  id: string;
+  chatId: string;
+  senderId: string;
+  senderName: string;
+  senderRole?: 'host' | 'cleaner' | 'worker' | 'admin';
+  senderProfilePicture?: string; // Profile picture URL
+  message: string;
+  timestamp: number;
+  readBy?: string[]; // Array of user IDs who have read this message
+  messageType?: 'text' | 'system' | 'image';
+  imageUrl?: string; // For image messages
+  attachments?: string[]; // For future file attachments
+}
+
+export interface Chat {
+  id: string;
+  type: 'team' | 'bidding' | 'direct'; // team = team chat, bidding = during bidding process, direct = 1-on-1
+  participants: string[]; // Array of user IDs
+  participantNames: string[]; // Array of user names for display
+  participantRoles?: string[]; // Array of user roles
+  participantProfilePictures?: { [userId: string]: string }; // Object mapping userId to profile picture URL
+  title?: string; // Custom chat title
+  lastMessage?: string;
+  lastMessageTime?: number;
+  lastMessageSender?: string;
+  unreadCount?: { [userId: string]: number }; // Unread count per user
+  createdAt: number;
+  updatedAt: number;
+  
+  // Context-specific fields
+  teamId?: string; // For team chats
+  recruitmentId?: string; // For bidding chats
+  cleaningJobId?: string; // For job-specific chats
+  bidId?: string; // For specific bid discussions
+  
+  // Chat settings
+  isActive: boolean;
+  isArchived?: boolean;
+  mutedBy?: string[]; // Users who have muted this chat
+}
+
+export interface ChatParticipant {
+  userId: string;
+  name: string;
+  role?: string;
+  joinedAt: number;
+  lastSeen?: number;
+  isOnline?: boolean;
+}
