@@ -117,6 +117,10 @@ export default function HostProfileScreenModern({ navigation }: any) {
   const [isUploadingPicture, setIsUploadingPicture] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
   
+  // About me states
+  const [aboutMe, setAboutMe] = useState((user as any)?.aboutMe || '');
+  const [isSavingAboutMe, setIsSavingAboutMe] = useState(false);
+  
   // Get stats
   const completedJobs = jobs.filter(j => j.hostId === user?.uid && j.status === 'completed').length;
   const activeJobs = jobs.filter(j => j.hostId === user?.uid && (j.status === 'open' || j.status === 'accepted' || j.status === 'in_progress')).length;
@@ -152,6 +156,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
       setPhone(user.phone || '');
       setEmail(user.email || '');
       setProfilePicture((user as any)?.profilePicture || null);
+      setAboutMe((user as any)?.aboutMe || '');
     }
   }, [user]);
 
@@ -519,6 +524,36 @@ export default function HostProfileScreenModern({ navigation }: any) {
       Alert.alert('Error', e.message || 'Failed to save profile');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Save about me
+  const saveAboutMe = async () => {
+    if (!user?.uid) return;
+    
+    setIsSavingAboutMe(true);
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, {
+        aboutMe: aboutMe.trim() || null,
+        updatedAt: new Date().toISOString()
+      });
+
+      // Update auth store to reflect changes immediately
+      const authStore = useAuthStore.getState();
+      if (authStore.user) {
+        authStore.setUser({
+          ...authStore.user,
+          aboutMe: aboutMe.trim() || null
+        } as any);
+      }
+      
+      Alert.alert('Success', 'About me updated successfully');
+    } catch (e: any) {
+      console.error('[HostProfileScreen] Error saving about me:', e);
+      Alert.alert('Error', e.message || 'Failed to save about me');
+    } finally {
+      setIsSavingAboutMe(false);
     }
   };
 
@@ -2693,6 +2728,51 @@ export default function HostProfileScreenModern({ navigation }: any) {
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={styles.saveButtonText}>Save Changes</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* About Me Section */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>About Me</Text>
+              <Text style={[styles.emptySubtext, { marginBottom: 20, textAlign: 'left' }]}>
+                Tell potential cleaners about yourself, your properties, and what you're looking for in a cleaning service
+              </Text>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>About Me</Text>
+                <TextInput
+                  style={[styles.input, { 
+                    height: 120, 
+                    textAlignVertical: 'top',
+                    paddingTop: 14
+                  }]}
+                  value={aboutMe}
+                  onChangeText={setAboutMe}
+                  placeholder="Tell cleaners about yourself, your properties, and what you're looking for in a cleaning service..."
+                  placeholderTextColor="#999"
+                  multiline={true}
+                  numberOfLines={6}
+                />
+                <Text style={{ 
+                  fontSize: 11, 
+                  color: '#666', 
+                  marginTop: 8,
+                  textAlign: 'right'
+                }}>
+                  {aboutMe.length}/500 characters
+                </Text>
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.saveButton}
+                onPress={saveAboutMe}
+                disabled={isSavingAboutMe}
+              >
+                {isSavingAboutMe ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save About Me</Text>
                 )}
               </TouchableOpacity>
             </View>

@@ -33,6 +33,7 @@ import { Job, UserStats, ActivityLog } from '../../utils/types';
 import { useAuthStore } from '../../stores/authStore';
 import PropertyCleanupTool from '../../components/PropertyCleanupTool';
 import { EmergencyCleaningDebugTool } from '../../components/EmergencyCleaningDebugTool';
+import { SearchCleanersDebugTool } from '../../components/SearchCleanersDebugTool';
 
 interface AdminStats {
   totalHosts: number;
@@ -607,6 +608,9 @@ export function AdminDashboard({ navigation }: any) {
           
           {/* Emergency Cleaning Debug Tool */}
           <EmergencyCleaningDebugTool />
+          
+          {/* SearchCleaners Debug Tool */}
+          <SearchCleanersDebugTool />
         </ScrollView>
       )}
 

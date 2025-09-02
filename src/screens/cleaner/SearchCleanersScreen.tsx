@@ -10,7 +10,8 @@ import {
   Modal,
   ActivityIndicator,
   Platform,
-  Switch
+  Switch,
+  Image
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,14 +21,20 @@ import {
   createRecruitmentPost,
   subscribeToHostRecruitments,
   subscribeToBids,
+  subscribeToBidsWithProfiles,
   acceptBid,
   rejectBid,
-  closeRecruitmentPost
+  closeRecruitmentPost,
+  getUserProfile,
+  UserProfile
 } from '../../services/cleanerRecruitmentService';
 import { CleanerRecruitment, CleanerBid } from '../../utils/types';
 import { geocodeAddressCrossPlatform } from '../../services/geocodingService';
 import { collection, query, where, onSnapshot, doc, updateDoc, getDocs } from 'firebase/firestore';
 import { db } from '../../utils/firebase';
+import { ProfileViewModal } from '../../components/ProfileViewModal';
+import { EmergencyCleaningModal } from '../EmergencyCleaningModal';
+import { BidsModalDebugger } from '../../components/BidsModalDebugger';
 
 export function SearchCleanersScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
@@ -42,6 +49,11 @@ export function SearchCleanersScreen({ navigation }: any) {
   const [showArchive, setShowArchive] = useState(false);
   const [archivedRecruitments, setArchivedRecruitments] = useState<CleanerRecruitment[]>([]);
   const [archivedEmergencyJobs, setArchivedEmergencyJobs] = useState<any[]>([]);
+
+  // Profile modal states
+  const [showCleanerProfileModal, setShowCleanerProfileModal] = useState(false);
+  const [selectedCleanerProfile, setSelectedCleanerProfile] = useState<UserProfile | null>(null);
+  const [loadingCleanerProfile, setLoadingCleanerProfile] = useState(false);
 
   // Property selection
   const [useExistingProperty, setUseExistingProperty] = useState(true);
@@ -175,7 +187,7 @@ export function SearchCleanersScreen({ navigation }: any) {
   useEffect(() => {
     if (!selectedRecruitment?.id) return;
 
-    const unsubscribe = subscribeToBids(selectedRecruitment.id, (bids) => {
+    const unsubscribe = subscribeToBidsWithProfiles(selectedRecruitment.id, (bids) => {
       setRecruitmentBids(bids);
     });
 
@@ -355,11 +367,11 @@ export function SearchCleanersScreen({ navigation }: any) {
   };
 
   const handleAcceptBid = async (bid: CleanerBid) => {
-    const cleanerDisplayName = (bid.cleanerFirstName || bid.cleanerLastName) 
-      ? `${bid.cleanerFirstName || ''} ${bid.cleanerLastName || ''}`.trim()
-      : bid.cleanerName && bid.cleanerName !== 'null null' 
-        ? bid.cleanerName 
-        : bid.cleanerEmail?.split('@')[0] || 'Cleaner';
+                  const cleanerDisplayName = (bid.cleanerFirstName && bid.cleanerFirstName !== 'undefined') || (bid.cleanerLastName && bid.cleanerLastName !== 'undefined')
+                    ? `${bid.cleanerFirstName && bid.cleanerFirstName !== 'undefined' ? bid.cleanerFirstName : ''} ${bid.cleanerLastName && bid.cleanerLastName !== 'undefined' ? bid.cleanerLastName : ''}`.trim()
+                    : bid.cleanerName && bid.cleanerName !== 'null null' && bid.cleanerName !== 'undefined'
+                      ? bid.cleanerName 
+                      : bid.cleanerEmail?.split('@')[0] || 'Cleaner';
     
     Alert.alert(
       'Accept Bid',
@@ -383,9 +395,9 @@ export function SearchCleanersScreen({ navigation }: any) {
   };
 
   const handleRejectBid = async (bid: CleanerBid) => {
-    const cleanerDisplayName = (bid.cleanerFirstName || bid.cleanerLastName) 
-      ? `${bid.cleanerFirstName || ''} ${bid.cleanerLastName || ''}`.trim()
-      : bid.cleanerName && bid.cleanerName !== 'null null' 
+    const cleanerDisplayName = (bid.cleanerFirstName && bid.cleanerFirstName !== 'undefined') || (bid.cleanerLastName && bid.cleanerLastName !== 'undefined')
+      ? `${bid.cleanerFirstName && bid.cleanerFirstName !== 'undefined' ? bid.cleanerFirstName : ''} ${bid.cleanerLastName && bid.cleanerLastName !== 'undefined' ? bid.cleanerLastName : ''}`.trim()
+      : bid.cleanerName && bid.cleanerName !== 'null null' && bid.cleanerName !== 'undefined'
         ? bid.cleanerName 
         : bid.cleanerEmail?.split('@')[0] || 'Cleaner';
     
@@ -440,7 +452,7 @@ export function SearchCleanersScreen({ navigation }: any) {
     
     Alert.alert(
       'Accept Emergency Bid',
-      `Accept ${bid.cleanerName}'s bid of $${bid.flatFee} for this emergency cleaning?`,
+      `Accept ${bid.cleanerName || 'Unknown Cleaner'}'s bid of $${bid.flatFee || '0'} for this emergency cleaning?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -485,7 +497,7 @@ export function SearchCleanersScreen({ navigation }: any) {
 
               Alert.alert(
                 'Emergency Bid Accepted!',
-                `${bid.cleanerName} has been assigned to your emergency cleaning. They will be notified immediately.`
+                `${bid.cleanerName || 'The cleaner'} has been assigned to your emergency cleaning. They will be notified immediately.`
               );
             } catch (error) {
               console.error('Error accepting emergency bid:', error);
@@ -503,7 +515,7 @@ export function SearchCleanersScreen({ navigation }: any) {
     
     Alert.alert(
       'Reject Emergency Bid',
-      `Reject ${bid.cleanerName}'s bid of $${bid.flatFee}?`,
+      `Reject ${bid.cleanerName || 'Unknown Cleaner'}'s bid of $${bid.flatFee || '0'}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -518,7 +530,7 @@ export function SearchCleanersScreen({ navigation }: any) {
                 rejectedAt: Date.now()
               });
 
-              Alert.alert('Bid Rejected', `${bid.cleanerName}'s bid has been rejected.`);
+              Alert.alert('Bid Rejected', `${bid.cleanerName || 'The cleaner'}'s bid has been rejected.`);
             } catch (error) {
               console.error('Error rejecting emergency bid:', error);
               Alert.alert('Error', 'Failed to reject emergency bid. Please try again.');
@@ -527,6 +539,69 @@ export function SearchCleanersScreen({ navigation }: any) {
         }
       ]
     );
+  };
+
+  // Handle showing cleaner profile
+  const handleShowCleanerProfile = async (cleanerId: string) => {
+    console.log('[SearchCleaners] handleShowCleanerProfile called with cleanerId:', cleanerId);
+    
+    // Prevent multiple simultaneous requests
+    if (loadingCleanerProfile || showCleanerProfileModal) {
+      console.log('[SearchCleaners] Already loading profile or modal open, skipping...');
+      return;
+    }
+    
+    // Validate cleanerId
+    if (!cleanerId || cleanerId.trim() === '') {
+      console.log('[SearchCleaners] Invalid cleanerId provided');
+      Alert.alert('Error', 'Invalid cleaner ID');
+      return;
+    }
+    
+    // Close bids modal first to prevent modal conflicts
+    console.log('[SearchCleaners] Closing bids modal to prevent conflicts...');
+    setShowBidsModal(false);
+    
+    setLoadingCleanerProfile(true);
+    try {
+      console.log('[SearchCleaners] Fetching user profile...');
+      const profile = await getUserProfile(cleanerId);
+      console.log('[SearchCleaners] Profile fetched:', profile ? 'Success' : 'Failed');
+      
+      if (profile) {
+        // Create a clean profile object without email for privacy
+        const cleanProfile = {
+          id: profile.id,
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          profilePicture: profile.profilePicture,
+          aboutMe: profile.aboutMe,
+          role: profile.role || 'cleaner',
+          rating: profile.rating,
+          completedJobs: profile.completedJobs,
+          serviceAddress: profile.serviceAddress,
+          specialties: profile.specialties
+          // Explicitly exclude email for privacy
+        };
+        console.log('[SearchCleaners] Setting profile and showing modal...');
+        setSelectedCleanerProfile(cleanProfile);
+        
+        // Small delay to ensure bids modal is fully closed before opening profile modal
+        setTimeout(() => {
+          if (!showCleanerProfileModal) { // Double-check modal isn't already open
+            setShowCleanerProfileModal(true);
+          }
+        }, 150);
+      } else {
+        console.log('[SearchCleaners] No profile data received');
+        Alert.alert('Error', 'Could not load cleaner profile');
+      }
+    } catch (error) {
+      console.error('[SearchCleaners] Error loading cleaner profile:', error);
+      Alert.alert('Error', 'Failed to load cleaner profile');
+    } finally {
+      setLoadingCleanerProfile(false);
+    }
   };
 
   return (
@@ -602,23 +677,30 @@ export function SearchCleanersScreen({ navigation }: any) {
                             EMERGENCY CLEANING
                           </Text>
                           <Text style={styles.emergencyJobAddress} numberOfLines={1}>
-                            {job.address}
+                            {job.address || 'No address provided'}
                           </Text>
                         </View>
                       </View>
                       <View style={styles.emergencyStatusBadge}>
                         <Text style={styles.emergencyStatusText}>
-                          {job.status.toUpperCase()}
+                          {job.status ? job.status.toUpperCase() : 'UNKNOWN'}
                         </Text>
                       </View>
                     </View>
                     
                     <View style={styles.emergencyJobDetails}>
                       <Text style={styles.emergencyJobUrgency}>
-                        {job.urgencyLevel?.toUpperCase().replace('-', ' ')} PRIORITY
+                        {job.urgencyLevel ? job.urgencyLevel.toUpperCase().replace('-', ' ') : 'HIGH'} PRIORITY
                       </Text>
                       <Text style={styles.emergencyJobDate}>
-                        {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'ASAP'} at {job.preferredTime || 'Flexible'}
+                        {job.preferredDate ? (() => {
+                          try {
+                            const date = new Date(job.preferredDate);
+                            return isNaN(date.getTime()) ? 'ASAP' : date.toLocaleDateString();
+                          } catch {
+                            return 'ASAP';
+                          }
+                        })() : 'ASAP'} at {typeof job.preferredTime === 'string' ? job.preferredTime : 'Flexible'}
                       </Text>
                       {job.emergencyReason && (
                         <Text style={styles.emergencyJobReason}>
@@ -670,68 +752,49 @@ export function SearchCleanersScreen({ navigation }: any) {
                     
                     {/* Display emergency bids for this job */}
                     {emergencyBids.filter(bid => bid.cleaningJobId === job.id).map(bid => (
-                      <View key={bid.id} style={{
-                        backgroundColor: '#FFFFFF',
-                        borderRadius: 8,
-                        padding: 12,
-                        marginTop: 12,
-                        borderWidth: 1,
-                        borderColor: '#FCA5A5'
-                      }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#0F172A' }}>
-                              {bid.cleanerName}
-                            </Text>
-                            <Text style={{ fontSize: 16, fontWeight: '700', color: '#10B981', marginTop: 2 }}>
-                              ${bid.flatFee}
+                      <View key={bid.id} style={styles.emergencyBidCard}>
+                        <View style={styles.emergencyBidRow}>
+                          <View style={styles.emergencyBidLeft}>
+                            <View style={styles.emergencyBidHeader}>
+                              <TouchableOpacity 
+                                style={styles.emergencyBidAvatar}
+                                onPress={() => handleShowCleanerProfile(bid.cleanerId)}
+                              >
+                                <Text style={styles.emergencyBidAvatarText}>
+                                  {bid.cleanerName ? bid.cleanerName.charAt(0).toUpperCase() : 'C'}
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity onPress={() => handleShowCleanerProfile(bid.cleanerId)}>
+                                <Text style={styles.emergencyBidCleanerName}>
+                                  {bid.cleanerName || 'Unknown Cleaner'}
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                            <Text style={styles.emergencyBidAmount}>
+                              ${bid.flatFee || '0'}
                             </Text>
                             {bid.message && (
-                              <Text style={{ fontSize: 12, color: '#64748B', marginTop: 4, fontStyle: 'italic' }}>
+                              <Text style={styles.emergencyBidMessage}>
                                 "{bid.message}"
                               </Text>
                             )}
                           </View>
-                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <View style={styles.emergencyBidActions}>
                             <TouchableOpacity
                               onPress={() => handleAcceptEmergencyBid(bid)}
-                              style={{
-                                backgroundColor: '#10B981',
-                                paddingHorizontal: 12,
-                                paddingVertical: 6,
-                                borderRadius: 6,
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 4
-                              }}
+                              style={styles.emergencyBidAcceptButton}
                             >
                               <Ionicons name="checkmark" size={14} color="white" />
-                              <Text style={{ 
-                                color: 'white', 
-                                fontSize: 12, 
-                                fontWeight: '600' 
-                              }}>
+                              <Text style={styles.emergencyBidAcceptText}>
                                 Accept
                               </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                               onPress={() => handleRejectEmergencyBid(bid)}
-                              style={{
-                                backgroundColor: '#EF4444',
-                                paddingHorizontal: 12,
-                                paddingVertical: 6,
-                                borderRadius: 6,
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 4
-                              }}
+                              style={styles.emergencyBidRejectButton}
                             >
                               <Ionicons name="close" size={14} color="white" />
-                              <Text style={{ 
-                                color: 'white', 
-                                fontSize: 12, 
-                                fontWeight: '600' 
-                              }}>
+                              <Text style={styles.emergencyBidRejectText}>
                                 Deny
                               </Text>
                             </TouchableOpacity>
@@ -859,7 +922,7 @@ export function SearchCleanersScreen({ navigation }: any) {
                         </View>
                         <View style={styles.archivedCardContent}>
                           <Text style={styles.archivedCardTitle}>Emergency Cleaning</Text>
-                          <Text style={styles.archivedCardAddress}>{job.address}</Text>
+                          <Text style={styles.archivedCardAddress}>{job.address || 'No address'}</Text>
                         </View>
                         <View style={[styles.archivedStatusBadge, 
                           job.status === 'completed' && styles.completedBadge,
@@ -867,14 +930,21 @@ export function SearchCleanersScreen({ navigation }: any) {
                           job.status === 'assigned' && styles.assignedBadge
                         ]}>
                           <Text style={styles.archivedStatusText}>
-                            {job.status.toUpperCase()}
+                            {job.status ? job.status.toUpperCase() : 'UNKNOWN'}
                           </Text>
                         </View>
                       </View>
                       
                       <View style={styles.archivedCardDetails}>
                         <Text style={styles.archivedCardDate}>
-                          {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'No date'}
+                          {job.preferredDate ? (() => {
+                            try {
+                              const date = new Date(job.preferredDate);
+                              return isNaN(date.getTime()) ? 'No date' : date.toLocaleDateString();
+                            } catch {
+                              return 'No date';
+                            }
+                          })() : 'No date'}
                         </Text>
                         {job.assignedCleanerName && (
                           <Text style={styles.archivedCardCleaner}>
@@ -1300,7 +1370,7 @@ export function SearchCleanersScreen({ navigation }: any) {
           <View style={styles.bidsModalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                Bids for {selectedRecruitment?.properties.length} {selectedRecruitment?.properties.length === 1 ? 'Property' : 'Properties'}
+                Bids for {String(selectedRecruitment?.properties?.length || 0)} {(selectedRecruitment?.properties?.length || 0) === 1 ? 'Property' : 'Properties'}
               </Text>
               <TouchableOpacity onPress={() => setShowBidsModal(false)}>
                 <Ionicons name="close" size={24} color="#64748B" />
@@ -1311,82 +1381,157 @@ export function SearchCleanersScreen({ navigation }: any) {
               {recruitmentBids.length === 0 ? (
                 <Text style={styles.emptyText}>No bids yet</Text>
               ) : (
-                recruitmentBids.map(bid => (
-                  <View key={bid.id} style={styles.bidCard}>
-                    <View style={styles.bidHeader}>
-                      <View style={styles.bidderInfo}>
-                        <Text style={styles.bidderName}>
-                          {(bid.cleanerFirstName || bid.cleanerLastName) 
-                            ? `${bid.cleanerFirstName || ''} ${bid.cleanerLastName || ''}`.trim()
-                            : bid.cleanerName && bid.cleanerName !== 'null null' 
-                              ? bid.cleanerName 
-                              : bid.cleanerEmail?.split('@')[0] || 'Cleaner'}
-                        </Text>
-                      </View>
-                      <Text style={styles.bidAmount}>
-                        ${bid.flatFee}/job
-                      </Text>
-                    </View>
+                recruitmentBids.map(bid => {
+                  try {
+                    // Safely construct cleaner display name
+                    const firstName = bid.cleanerFirstName && typeof bid.cleanerFirstName === 'string' && bid.cleanerFirstName.trim() !== '' && bid.cleanerFirstName !== 'undefined' ? bid.cleanerFirstName.trim() : '';
+                    const lastName = bid.cleanerLastName && typeof bid.cleanerLastName === 'string' && bid.cleanerLastName.trim() !== '' && bid.cleanerLastName !== 'undefined' ? bid.cleanerLastName.trim() : '';
+                    const cleanerName = bid.cleanerName && typeof bid.cleanerName === 'string' && bid.cleanerName.trim() !== '' && bid.cleanerName !== 'undefined' && bid.cleanerName !== 'null null' ? bid.cleanerName.trim() : '';
+                    const cleanerEmail = bid.cleanerEmail && typeof bid.cleanerEmail === 'string' && bid.cleanerEmail.trim() !== '' && bid.cleanerEmail !== 'undefined' ? bid.cleanerEmail.trim() : '';
+                    
+                    const cleanerDisplayName = (firstName || lastName) 
+                      ? `${firstName} ${lastName}`.trim()
+                      : cleanerName || cleanerEmail.split('@')[0] || 'Unknown Cleaner';
 
-                    {bid.rating && (
-                      <View style={styles.bidInfo}>
-                        <Ionicons name="star" size={16} color="#F59E0B" />
-                        <Text style={styles.bidInfoText}>
-                          {bid.rating} ({bid.completedJobs} jobs)
-                        </Text>
-                      </View>
-                    )}
+                    // Safely get avatar initial
+                    const avatarInitial = cleanerDisplayName && cleanerDisplayName.length > 0 ? cleanerDisplayName.charAt(0).toUpperCase() : 'C';
 
-                    {bid.message && (
-                      <Text style={styles.bidMessage}>{bid.message}</Text>
-                    )}
+                    // Safely convert numeric values
+                    const flatFeeText = String(bid.flatFee || 0);
+                    const ratingText = bid.rating && typeof bid.rating === 'number' && bid.rating > 0 ? String(bid.rating) : null;
+                    const completedJobsText = String(bid.completedJobs || 0);
 
-                    {bid.specialties && bid.specialties.length > 0 && (
-                      <View style={styles.specialtiesContainer}>
-                        {bid.specialties.map((specialty, index) => (
-                          <View key={index} style={styles.specialtyChip}>
-                            <Text style={styles.specialtyText}>{specialty}</Text>
+                    // Safely handle message
+                    const messageText = bid.message && typeof bid.message === 'string' && bid.message.trim() !== '' && bid.message !== 'undefined' ? bid.message.trim() : null;
+
+                    // Safely handle specialties
+                    const validSpecialties = bid.specialties && Array.isArray(bid.specialties) 
+                      ? bid.specialties.filter(s => s && typeof s === 'string' && s.trim() !== '' && s !== 'undefined' && s !== 'null').map(s => s.trim())
+                      : [];
+
+                    return (
+                      <View key={bid.id || 'unknown'} style={styles.bidCard}>
+                        <View style={styles.bidHeader}>
+                          <View style={styles.bidderInfo}>
+                            <View style={styles.bidderProfileSection}>
+                              <TouchableOpacity 
+                                style={styles.cleanerAvatar}
+                                onPress={() => bid.cleanerId && handleShowCleanerProfile(bid.cleanerId)}
+                              >
+                                {(bid as any).cleanerProfile?.profilePicture ? (
+                                  <Image
+                                    source={{ uri: (bid as any).cleanerProfile.profilePicture }}
+                                    style={styles.cleanerAvatarImage}
+                                    resizeMode="cover"
+                                  />
+                                ) : (
+                                  <Text style={styles.cleanerAvatarText}>
+                                    {avatarInitial}
+                                  </Text>
+                                )}
+                              </TouchableOpacity>
+                              <View style={styles.bidderNameSection}>
+                                <TouchableOpacity onPress={() => bid.cleanerId && handleShowCleanerProfile(bid.cleanerId)}>
+                                  <Text style={[styles.bidderName, { textDecorationLine: 'underline' }]}>
+                                    {cleanerDisplayName}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
                           </View>
-                        ))}
-                      </View>
-                    )}
+                          <Text style={styles.bidAmount}>
+                            ${flatFeeText}/job
+                          </Text>
+                        </View>
 
-                    {bid.status === 'pending' && selectedRecruitment?.status === 'open' && (
-                      <View style={styles.bidActions}>
-                        <TouchableOpacity
-                          style={styles.acceptButton}
-                          onPress={() => handleAcceptBid(bid)}
-                        >
-                          <Text style={styles.acceptButtonText}>Accept & Add to Team</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.rejectButton}
-                          onPress={() => handleRejectBid(bid)}
-                        >
-                          <Text style={styles.rejectButtonText}>Reject</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
+                        {ratingText && (
+                          <View style={styles.bidInfo}>
+                            <Ionicons name="star" size={16} color="#F59E0B" />
+                            <Text style={styles.bidInfoText}>
+                              {ratingText} ({completedJobsText} jobs)
+                            </Text>
+                          </View>
+                        )}
 
-                    {bid.status === 'accepted' && (
-                      <View style={styles.acceptedBadge}>
-                        <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                        <Text style={styles.acceptedText}>Added to Team</Text>
-                      </View>
-                    )}
+                        {messageText && (
+                          <Text style={styles.bidMessage}>{messageText}</Text>
+                        )}
 
-                    {bid.status === 'rejected' && (
-                      <View style={styles.rejectedBadge}>
-                        <Text style={styles.rejectedText}>Rejected</Text>
+                        {validSpecialties.length > 0 && (
+                          <View style={styles.specialtiesContainer}>
+                            {validSpecialties.map((specialty, index) => (
+                              <View key={index} style={styles.specialtyChip}>
+                                <Text style={styles.specialtyText}>{specialty}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+
+                        {bid.status === 'pending' && selectedRecruitment?.status === 'open' && (
+                          <View style={styles.bidActions}>
+                            <TouchableOpacity
+                              style={styles.acceptButton}
+                              onPress={() => handleAcceptBid(bid)}
+                            >
+                              <Text style={styles.acceptButtonText}>Accept & Add to Team</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.rejectButton}
+                              onPress={() => handleRejectBid(bid)}
+                            >
+                              <Text style={styles.rejectButtonText}>Reject</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+
+                        {bid.status === 'accepted' && (
+                          <View style={styles.acceptedBadge}>
+                            <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                            <Text style={styles.acceptedText}>Added to Team</Text>
+                          </View>
+                        )}
+
+                        {bid.status === 'rejected' && (
+                          <View style={styles.rejectedBadge}>
+                            <Text style={styles.rejectedText}>Rejected</Text>
+                          </View>
+                        )}
                       </View>
-                    )}
-                  </View>
-                ))
+                    );
+                  } catch (error) {
+                    console.error('[SearchCleaners] Error rendering bid:', error, bid);
+                    return (
+                      <View key={bid.id || Math.random()} style={styles.bidCard}>
+                        <Text style={styles.emptyText}>Error loading bid</Text>
+                      </View>
+                    );
+                  }
+                })
               )}
             </ScrollView>
           </View>
         </View>
       </Modal>
+
+      {/* Cleaner Profile Modal */}
+      <ProfileViewModal
+        visible={showCleanerProfileModal && selectedCleanerProfile !== null}
+        onClose={() => {
+          setShowCleanerProfileModal(false);
+          setSelectedCleanerProfile(null);
+          setLoadingCleanerProfile(false);
+          // Re-open bids modal after closing profile modal
+          setTimeout(() => {
+            setShowBidsModal(true);
+          }, 100);
+        }}
+        user={selectedCleanerProfile || {
+          id: '',
+          firstName: '',
+          lastName: '',
+          role: 'cleaner'
+        }}
+      />
     </>
   );
 }
@@ -2356,5 +2501,121 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 500,
     maxHeight: '80%',
+  },
+  
+  // Cleaner profile styles
+  bidderProfileSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cleanerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    overflow: 'hidden',
+  },
+  cleanerAvatarImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  cleanerAvatarText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: 'white',
+  },
+  bidderNameSection: {
+    flex: 1,
+  },
+  
+  // Emergency bid styles
+  emergencyBidCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  emergencyBidRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  emergencyBidLeft: {
+    flex: 1,
+  },
+  emergencyBidHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  emergencyBidAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  emergencyBidAvatarText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'white',
+  },
+  emergencyBidCleanerName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+    textDecorationLine: 'underline',
+  },
+  emergencyBidAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#10B981',
+    marginTop: 2,
+  },
+  emergencyBidMessage: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  emergencyBidActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  emergencyBidAcceptButton: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  emergencyBidAcceptText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  emergencyBidRejectButton: {
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  emergencyBidRejectText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

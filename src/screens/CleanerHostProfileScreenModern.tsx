@@ -113,6 +113,10 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
   const [isUploadingPicture, setIsUploadingPicture] = useState(false);
   const [showImagePicker, setShowImagePicker] = useState(false);
   
+  // About me states
+  const [aboutMe, setAboutMe] = useState((user as any)?.aboutMe || '');
+  const [isSavingAboutMe, setIsSavingAboutMe] = useState(false);
+  
   // Get cleaner-specific stats from assigned cleaning jobs
   const assignedJobs = allJobs.filter(job => 
     job.assignedCleanerId === user?.uid || job.teamCleaners?.includes(user?.uid)
@@ -162,6 +166,7 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       setPhone(user.phone || '');
       setEmail(user.email || '');
       setProfilePicture((user as any)?.profilePicture || null);
+      setAboutMe((user as any)?.aboutMe || '');
       
       // Initialize service address states
       const profile = user.cleanerProfile as any;
@@ -421,6 +426,36 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       Alert.alert('Error', e.message || 'Failed to save profile');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Save about me
+  const saveAboutMe = async () => {
+    if (!user?.uid) return;
+    
+    setIsSavingAboutMe(true);
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, {
+        aboutMe: aboutMe.trim() || null,
+        updatedAt: new Date().toISOString()
+      });
+
+      // Update auth store to reflect changes immediately
+      const authStore = useAuthStore.getState();
+      if (authStore.user) {
+        authStore.setUser({
+          ...authStore.user,
+          aboutMe: aboutMe.trim() || null
+        } as any);
+      }
+      
+      Alert.alert('Success', 'About me updated successfully');
+    } catch (e: any) {
+      console.error('[CleanerProfileScreen] Error saving about me:', e);
+      Alert.alert('Error', e.message || 'Failed to save about me');
+    } finally {
+      setIsSavingAboutMe(false);
     }
   };
 
@@ -2593,6 +2628,52 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
                   )}
                 </TouchableOpacity>
               </View>
+            ) : null}
+
+            {/* About Me Section */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>About Me</Text>
+              <Text style={[styles.emptySubtext, { marginBottom: 20, textAlign: 'left' }]}>
+                Tell potential clients about your cleaning experience, specialties, and what makes you unique
+              </Text>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>About Me</Text>
+                <TextInput
+                  style={[styles.input, { 
+                    height: 120, 
+                    textAlignVertical: 'top',
+                    paddingTop: 14
+                  }]}
+                  value={aboutMe}
+                  onChangeText={setAboutMe}
+                  placeholder="Tell clients about your cleaning experience, specialties, and what makes you stand out as a professional cleaner..."
+                  placeholderTextColor="#999"
+                  multiline={true}
+                  numberOfLines={6}
+                />
+                <Text style={{ 
+                  fontSize: 11, 
+                  color: '#666', 
+                  marginTop: 8,
+                  textAlign: 'right'
+                }}>
+                  {aboutMe.length}/500 characters
+                </Text>
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.saveButton}
+                onPress={saveAboutMe}
+                disabled={isSavingAboutMe}
+              >
+                {isSavingAboutMe ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save About Me</Text>
+                )}
+              </TouchableOpacity>
+            </View>
             ) : (
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionTitle}>Service Location</Text>

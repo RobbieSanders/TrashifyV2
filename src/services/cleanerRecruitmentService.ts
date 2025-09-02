@@ -22,6 +22,25 @@ import { useNotifications } from '../stores/notificationsStore';
 import { geocodeAddressCrossPlatform } from './geocodingService';
 import { isPropertyWithinRadiusGoogle } from './googleGeocodingService';
 
+// User profile data interface
+export interface UserProfile {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  profilePicture?: string;
+  aboutMe?: string;
+  role?: 'host' | 'cleaner';
+  // Host-specific fields
+  totalProperties?: number;
+  memberSince?: number;
+  // Cleaner-specific fields
+  rating?: number;
+  completedJobs?: number;
+  serviceAddress?: string;
+  specialties?: string[];
+}
+
 // Cache for distance calculations to avoid repeated API calls
 const distanceCache = new Map<string, { distance: number; timestamp: number }>();
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
@@ -864,6 +883,102 @@ export function subscribeToFilteredEmergencyJobs(
     }
   }, (error) => {
     console.error('[Emergency] Error subscribing to filtered emergency jobs:', error);
+  });
+}
+
+// Fetch user profile data for display in modals
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  try {
+    const userDoc = await getDoc(doc(db, 'users', userId));
+    if (!userDoc.exists()) {
+      console.warn('[Recruitment] User not found:', userId);
+      return null;
+    }
+    
+    const userData = userDoc.data();
+    const cleanerProfile = userData.cleanerProfile;
+    
+    // Count properties for hosts
+    let totalProperties = 0;
+    if (!cleanerProfile) {
+      try {
+        const propertiesSnapshot = await getDocs(
+          query(
+            collection(db, 'properties'),
+            where('hostId', '==', userId),
+            limit(100)
+          )
+        );
+        totalProperties = propertiesSnapshot.size;
+      } catch (error) {
+        console.log('[Recruitment] Could not count properties:', error);
+      }
+    }
+    
+    const profile: UserProfile = {
+      id: userId,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+      email: userData.email,
+      profilePicture: userData.profilePicture,
+      aboutMe: userData.aboutMe,
+      role: cleanerProfile ? 'cleaner' : 'host',
+      memberSince: userData.createdAt || userData.joinedAt,
+      // Host-specific fields
+      totalProperties,
+      // Cleaner-specific fields
+      rating: cleanerProfile?.rating,
+      completedJobs: cleanerProfile?.totalCleanings,
+      serviceAddress: cleanerProfile?.serviceAddress,
+      specialties: cleanerProfile?.specialties
+    };
+    
+    return profile;
+  } catch (error) {
+    console.error('[Recruitment] Error fetching user profile:', error);
+    return null;
+  }
+}
+
+// Enhanced subscription to include host profile data
+export function subscribeToFilteredRecruitmentsWithProfiles(
+  cleanerId: string,
+  callback: (recruitments: (CleanerRecruitment & { hostProfile?: UserProfile })[]) => void
+) {
+  return subscribeToFilteredRecruitments(cleanerId, async (recruitments) => {
+    // Fetch host profiles for each recruitment
+    const recruitmentsWithProfiles = await Promise.all(
+      recruitments.map(async (recruitment) => {
+        const hostProfile = await getUserProfile(recruitment.hostId);
+        return {
+          ...recruitment,
+          hostProfile: hostProfile || undefined
+        };
+      })
+    );
+    
+    callback(recruitmentsWithProfiles);
+  });
+}
+
+// Enhanced subscription to include cleaner profile data in bids
+export function subscribeToBidsWithProfiles(
+  recruitmentId: string, 
+  callback: (bids: (CleanerBid & { cleanerProfile?: UserProfile })[]) => void
+) {
+  return subscribeToBids(recruitmentId, async (bids) => {
+    // Fetch cleaner profiles for each bid
+    const bidsWithProfiles = await Promise.all(
+      bids.map(async (bid) => {
+        const cleanerProfile = await getUserProfile(bid.cleanerId);
+        return {
+          ...bid,
+          cleanerProfile: cleanerProfile || undefined
+        };
+      })
+    );
+    
+    callback(bidsWithProfiles);
   });
 }
 

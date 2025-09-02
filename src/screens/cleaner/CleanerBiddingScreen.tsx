@@ -9,7 +9,8 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
-  Dimensions
+  Dimensions,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../stores/authStore';
@@ -19,27 +20,33 @@ import {
   subscribeToOpenRecruitments,
   subscribeToFilteredRecruitments,
   subscribeToFilteredEmergencyJobs,
+  subscribeToFilteredRecruitmentsWithProfiles,
   submitBid,
   getCleanerBidHistory,
-  withdrawBid
+  withdrawBid,
+  getUserProfile,
+  UserProfile
 } from '../../services/cleanerRecruitmentService';
 import { geocodeAddressCrossPlatform } from '../../services/geocodingService';
 import { CleanerRecruitment, CleanerBid, CleaningJob } from '../../utils/types';
 import { calculateDistanceGoogle } from '../../services/googleGeocodingService';
+import { ProfileViewModal } from '../../components/ProfileViewModal';
 
 const { width } = Dimensions.get('window');
 
 export function CleanerBiddingScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
-  const [openRecruitments, setOpenRecruitments] = useState<CleanerRecruitment[]>([]);
+  const [openRecruitments, setOpenRecruitments] = useState<(CleanerRecruitment & { hostProfile?: UserProfile })[]>([]);
   const [emergencyJobs, setEmergencyJobs] = useState<CleaningJob[]>([]);
   const [myBids, setMyBids] = useState<CleanerBid[]>([]);
-  const [selectedRecruitment, setSelectedRecruitment] = useState<CleanerRecruitment | null>(null);
+  const [selectedRecruitment, setSelectedRecruitment] = useState<(CleanerRecruitment & { hostProfile?: UserProfile }) | null>(null);
   const [selectedEmergencyJob, setSelectedEmergencyJob] = useState<CleaningJob | null>(null);
   const [showBidModal, setShowBidModal] = useState(false);
   const [showEmergencyBidModal, setShowEmergencyBidModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingBids, setLoadingBids] = useState(true);
+  const [isOpeningModal, setIsOpeningModal] = useState(false);
+  const [isSubmittingBid, setIsSubmittingBid] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'turnovers' | 'location'>('newest');
   const [filterBy, setFilterBy] = useState<'all' | 'high-volume' | 'emergency-cleanings'>('all');
   
@@ -52,6 +59,11 @@ export function CleanerBiddingScreen({ navigation }: any) {
   const [showApplicationModal, setShowApplicationModal] = useState(false);
   const [selectedApplication, setSelectedApplication] = useState<CleanerBid | null>(null);
   const [activeTab, setActiveTab] = useState<'team' | 'emergency'>('team');
+  
+  // Profile modal states
+  const [showHostProfileModal, setShowHostProfileModal] = useState(false);
+  const [selectedHostProfile, setSelectedHostProfile] = useState<UserProfile | null>(null);
+  const [loadingHostProfile, setLoadingHostProfile] = useState(false);
 
   // Availability options
   const availabilityOptions = [
@@ -96,7 +108,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
           }
           
           // Subscribe to recruitments with updated profile
-          unsubscribe = subscribeToFilteredRecruitments(user.uid, (recruitments) => {
+          unsubscribe = subscribeToFilteredRecruitmentsWithProfiles(user.uid, (recruitments) => {
             setOpenRecruitments(recruitments);
           });
         }
@@ -230,6 +242,10 @@ export function CleanerBiddingScreen({ navigation }: any) {
       return;
     }
 
+    // Prevent multiple simultaneous submissions
+    if (isSubmittingBid || loading) return;
+
+    setIsSubmittingBid(true);
     setLoading(true);
     try {
       const bidData: any = {
@@ -276,17 +292,18 @@ export function CleanerBiddingScreen({ navigation }: any) {
       Alert.alert('Error', 'Failed to submit application');
     } finally {
       setLoading(false);
+      setIsSubmittingBid(false);
     }
   };
 
   // Check if cleaner has already bid on a recruitment - memoized for performance
   const hasAlreadyBid = useCallback((recruitmentId: string) => {
-    return myBids.some(bid => bid.recruitmentId === recruitmentId);
+    return myBids.some(bid => bid.recruitmentId === recruitmentId && bid.status !== 'withdrawn');
   }, [myBids]);
   
   // Get bid for a specific recruitment - memoized for performance
   const getBidForRecruitment = useCallback((recruitmentId: string) => {
-    return myBids.find(bid => bid.recruitmentId === recruitmentId);
+    return myBids.find(bid => bid.recruitmentId === recruitmentId && bid.status !== 'withdrawn');
   }, [myBids]);
 
   // Handle withdrawing a bid - optimized with useCallback
@@ -338,11 +355,11 @@ export function CleanerBiddingScreen({ navigation }: any) {
     
     filtered = filtered.filter(r => !pendingBidRecruitmentIds.includes(r.id));
 
-    // Separate applied and unapplied opportunities (excluding pending ones)
+    // Separate applied and unapplied opportunities (excluding pending and withdrawn ones)
     const unapplied = filtered.filter(r => !hasAlreadyBid(r.id));
     const applied = filtered.filter(r => {
       const bid = getBidForRecruitment(r.id);
-      return bid && bid.status !== 'pending'; // Only show non-pending applied bids
+      return bid && bid.status !== 'pending' && bid.status !== 'withdrawn'; // Only show non-pending, non-withdrawn applied bids
     });
 
     // Apply sorting to unapplied opportunities
@@ -399,6 +416,122 @@ export function CleanerBiddingScreen({ navigation }: any) {
     
     return totalEstimate * turnovers;
   }, []);
+
+  // Handle showing host profile
+  const handleShowHostProfile = async (hostId: string) => {
+    console.log('[CleanerBidding] handleShowHostProfile called with hostId:', hostId);
+    
+    // Prevent multiple simultaneous requests
+    if (loadingHostProfile || showHostProfileModal) {
+      console.log('[CleanerBidding] Already loading profile or modal open, skipping...');
+      return;
+    }
+    
+    // Validate hostId
+    if (!hostId || hostId.trim() === '') {
+      console.log('[CleanerBidding] Invalid hostId provided');
+      Alert.alert('Error', 'Invalid host ID');
+      return;
+    }
+    
+    // Close any open modals first to prevent modal conflicts
+    console.log('[CleanerBidding] Closing modals to prevent conflicts...');
+    const wasShowingBidModal = showBidModal;
+    const wasShowingEmergencyBidModal = showEmergencyBidModal;
+    const wasShowingApplicationModal = showApplicationModal;
+    
+    setShowBidModal(false);
+    setShowEmergencyBidModal(false);
+    setShowApplicationModal(false);
+    
+    setLoadingHostProfile(true);
+    try {
+      console.log('[CleanerBidding] Fetching user profile...');
+      const profile = await getUserProfile(hostId);
+      console.log('[CleanerBidding] Profile fetched:', profile ? 'Success' : 'Failed');
+      
+      if (profile) {
+        // Create a clean profile object without email for privacy
+        const cleanProfile = {
+          id: profile.id,
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          profilePicture: profile.profilePicture,
+          aboutMe: profile.aboutMe,
+          role: profile.role || 'host',
+          rating: profile.rating,
+          completedJobs: profile.completedJobs,
+          totalProperties: profile.totalProperties,
+          memberSince: profile.memberSince
+          // Explicitly exclude email for privacy
+        };
+        console.log('[CleanerBidding] Setting profile and showing modal...');
+        setSelectedHostProfile(cleanProfile);
+        
+        // Small delay to ensure other modals are fully closed before opening profile modal
+        setTimeout(() => {
+          if (!showHostProfileModal) { // Double-check modal isn't already open
+            setShowHostProfileModal(true);
+            // Store which modal was open so we can return to it
+            (setSelectedHostProfile as any).previousModal = {
+              bidModal: wasShowingBidModal,
+              emergencyBidModal: wasShowingEmergencyBidModal,
+              applicationModal: wasShowingApplicationModal
+            };
+          }
+        }, 150);
+      } else {
+        console.log('[CleanerBidding] No profile data received');
+        Alert.alert('Error', 'Could not load host profile');
+      }
+    } catch (error) {
+      console.error('[CleanerBidding] Error loading host profile:', error);
+      Alert.alert('Error', 'Failed to load host profile');
+    } finally {
+      setLoadingHostProfile(false);
+    }
+  };
+
+  // Handle showing emergency job host profile
+  const handleShowEmergencyHostProfile = async (job: CleaningJob) => {
+    if (job.hostId) {
+      await handleShowHostProfile(job.hostId);
+    }
+  };
+
+  // Protected modal opening function to prevent multiple rapid clicks
+  const handleOpenBidModal = useCallback(async (recruitment: CleanerRecruitment & { hostProfile?: UserProfile }) => {
+    // Prevent multiple simultaneous modal openings
+    if (isOpeningModal || showBidModal) return;
+    
+    setIsOpeningModal(true);
+    try {
+      setSelectedRecruitment(recruitment);
+      setShowBidModal(true);
+    } finally {
+      // Small delay to prevent rapid clicking
+      setTimeout(() => {
+        setIsOpeningModal(false);
+      }, 300);
+    }
+  }, [isOpeningModal, showBidModal]);
+
+  // Protected emergency modal opening function
+  const handleOpenEmergencyBidModal = useCallback(async (job: CleaningJob) => {
+    // Prevent multiple simultaneous modal openings
+    if (isOpeningModal || showEmergencyBidModal) return;
+    
+    setIsOpeningModal(true);
+    try {
+      setSelectedEmergencyJob(job);
+      setShowEmergencyBidModal(true);
+    } finally {
+      // Small delay to prevent rapid clicking
+      setTimeout(() => {
+        setIsOpeningModal(false);
+      }, 300);
+    }
+  }, [isOpeningModal, showEmergencyBidModal]);
 
   return (
     <>
@@ -592,10 +725,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
                 <TouchableOpacity
                   key={job.id}
                   style={styles.emergencyCard}
-                  onPress={() => {
-                    setSelectedEmergencyJob(job);
-                    setShowEmergencyBidModal(true);
-                  }}
+                  onPress={() => handleOpenEmergencyBidModal(job)}
                 >
                   {/* Pulsing animation border */}
                   <View style={[styles.emergencyCardBorder, { borderColor: urgencyColor }]} />
@@ -682,15 +812,21 @@ export function CleanerBiddingScreen({ navigation }: any) {
                   </View>
 
                   <TouchableOpacity 
-                    style={[styles.emergencyBidButton, { backgroundColor: urgencyColor }]}
+                    style={[styles.emergencyBidButton, { backgroundColor: urgencyColor }, isOpeningModal && styles.buttonDisabled]}
                     onPress={(e) => {
                       e.stopPropagation();
-                      setSelectedEmergencyJob(job);
-                      setShowEmergencyBidModal(true);
+                      handleOpenEmergencyBidModal(job);
                     }}
+                    disabled={isOpeningModal}
                   >
-                    <Ionicons name="flash" size={16} color="white" />
-                    <Text style={styles.emergencyBidButtonText}>BID NOW</Text>
+                    {isOpeningModal ? (
+                      <ActivityIndicator color="white" size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="flash" size={16} color="white" />
+                        <Text style={styles.emergencyBidButtonText}>BID NOW</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 </TouchableOpacity>
               );
@@ -714,7 +850,7 @@ export function CleanerBiddingScreen({ navigation }: any) {
               </Text>
             </View>
           ) : (
-            filteredAndSortedRecruitments.map((recruitment: CleanerRecruitment) => {
+            filteredAndSortedRecruitments.map((recruitment: CleanerRecruitment & { hostProfile?: UserProfile }) => {
               const alreadyBid = hasAlreadyBid(recruitment.id);
               const myBid = getBidForRecruitment(recruitment.id);
               const estimatedEarnings = getEstimatedMonthlyEarnings(recruitment);
@@ -724,20 +860,33 @@ export function CleanerBiddingScreen({ navigation }: any) {
                   key={recruitment.id}
                   style={[styles.opportunityCard, alreadyBid && styles.appliedCard]}
                   onPress={() => {
-                    if (!alreadyBid) {
-                      setSelectedRecruitment(recruitment);
-                      setShowBidModal(true);
+                    if (!alreadyBid && !isOpeningModal) {
+                      handleOpenBidModal(recruitment);
                     }
                   }}
-                  disabled={alreadyBid}
+                  disabled={alreadyBid || isOpeningModal}
                 >
                   <View style={styles.cardHeader}>
                     <View style={styles.cardHeaderLeft}>
-                      <View style={styles.hostAvatar}>
-                        <Text style={styles.hostAvatarText}>
-                          {recruitment.hostName.charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
+                      <TouchableOpacity 
+                        style={styles.hostAvatar}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleShowHostProfile(recruitment.hostId);
+                        }}
+                      >
+                        {recruitment.hostProfile?.profilePicture ? (
+                          <Image
+                            source={{ uri: recruitment.hostProfile.profilePicture }}
+                            style={styles.hostAvatarImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Text style={styles.hostAvatarText}>
+                            {recruitment.hostName.charAt(0).toUpperCase()}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
                       <View style={styles.cardHeaderInfo}>
                         <Text style={styles.opportunityTitle}>
                           {recruitment.title || 
@@ -747,7 +896,16 @@ export function CleanerBiddingScreen({ navigation }: any) {
                             )
                           }
                         </Text>
-                        <Text style={styles.hostName}>by {recruitment.hostName}</Text>
+                        <TouchableOpacity 
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleShowHostProfile(recruitment.hostId);
+                          }}
+                        >
+                          <Text style={[styles.hostName, { textDecorationLine: 'underline' }]}>
+                            by {recruitment.hostName}
+                          </Text>
+                        </TouchableOpacity>
                       </View>
                     </View>
                     <View style={styles.cardHeaderRight}>
@@ -911,15 +1069,21 @@ export function CleanerBiddingScreen({ navigation }: any) {
                   <View style={styles.cardFooter}>
                     {!alreadyBid ? (
                       <TouchableOpacity 
-                        style={styles.applyButton}
+                        style={[styles.applyButton, isOpeningModal && styles.buttonDisabled]}
                         onPress={(e) => {
                           e.stopPropagation();
-                          setSelectedRecruitment(recruitment);
-                          setShowBidModal(true);
+                          handleOpenBidModal(recruitment);
                         }}
+                        disabled={isOpeningModal}
                       >
-                        <Text style={styles.applyButtonText}>Apply Now</Text>
-                        <Ionicons name="arrow-forward" size={14} color="white" />
+                        {isOpeningModal ? (
+                          <ActivityIndicator color="white" size="small" />
+                        ) : (
+                          <>
+                            <Text style={styles.applyButtonText}>Apply Now</Text>
+                            <Ionicons name="arrow-forward" size={14} color="white" />
+                          </>
+                        )}
                       </TouchableOpacity>
                     ) : myBid && myBid.status === 'pending' && (
                       <TouchableOpacity
@@ -1035,14 +1199,39 @@ export function CleanerBiddingScreen({ navigation }: any) {
                   <View key={`regular-pending-${bid.id}`} style={styles.pendingBidCard}>
                     <View style={styles.pendingBidHeader}>
                       <View style={styles.pendingBidLeft}>
-                        <View style={[styles.pendingBidIcon, { backgroundColor: '#1E88E5' }]}>
-                          <Ionicons name="people" size={20} color="white" />
-                        </View>
+                        <TouchableOpacity 
+                          style={[styles.pendingBidIcon, { backgroundColor: '#1E88E5' }]}
+                          onPress={() => {
+                            if (recruitment?.hostId) {
+                              handleShowHostProfile(recruitment.hostId);
+                            }
+                          }}
+                        >
+                          {recruitment?.hostProfile?.profilePicture ? (
+                            <Image
+                              source={{ uri: recruitment.hostProfile.profilePicture }}
+                              style={styles.pendingBidIconImage}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <Text style={styles.pendingBidIconText}>
+                              {recruitment?.hostName?.charAt(0).toUpperCase() || 'H'}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
                         <View style={styles.pendingBidInfo}>
                           <Text style={styles.pendingBidTitle}>TEAM APPLICATION</Text>
-                          <Text style={styles.pendingBidSubtitle}>
-                            {recruitment ? `${recruitment.hostName}'s Team` : 'Team application pending'}
-                          </Text>
+                          <TouchableOpacity 
+                            onPress={() => {
+                              if (recruitment?.hostId) {
+                                handleShowHostProfile(recruitment.hostId);
+                              }
+                            }}
+                          >
+                            <Text style={[styles.pendingBidSubtitle, { textDecorationLine: 'underline' }]}>
+                              {recruitment ? `${recruitment.hostName}'s Team` : 'Team application pending'}
+                            </Text>
+                          </TouchableOpacity>
                           <Text style={styles.pendingBidDate}>
                             Submitted {new Date(bid.bidDate).toLocaleDateString()}
                           </Text>
@@ -1100,16 +1289,31 @@ export function CleanerBiddingScreen({ navigation }: any) {
               {selectedRecruitment && (
                 <View style={styles.opportunitySummary}>
                   <View style={styles.summaryHeader}>
-                    <View style={styles.summaryHostAvatar}>
-                      <Text style={styles.summaryHostAvatarText}>
-                        {selectedRecruitment.hostName.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
+                    <TouchableOpacity 
+                      style={styles.summaryHostAvatar}
+                      onPress={() => handleShowHostProfile(selectedRecruitment.hostId)}
+                    >
+                      {selectedRecruitment.hostProfile?.profilePicture ? (
+                        <Image
+                          source={{ uri: selectedRecruitment.hostProfile.profilePicture }}
+                          style={styles.summaryHostAvatarImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Text style={styles.summaryHostAvatarText}>
+                          {selectedRecruitment.hostName.charAt(0).toUpperCase()}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
                     <View style={styles.summaryInfo}>
                       <Text style={styles.summaryTitle}>
                         {selectedRecruitment.title || `${selectedRecruitment.hostName}'s Team`}
                       </Text>
-                      <Text style={styles.summaryHost}>by {selectedRecruitment.hostName}</Text>
+                      <TouchableOpacity onPress={() => handleShowHostProfile(selectedRecruitment.hostId)}>
+                        <Text style={[styles.summaryHost, { textDecorationLine: 'underline' }]}>
+                          by {selectedRecruitment.hostName}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                   
@@ -1188,9 +1392,9 @@ export function CleanerBiddingScreen({ navigation }: any) {
 
 
                 <TouchableOpacity
-                  style={[styles.submitButton, loading && styles.buttonDisabled]}
+                  style={[styles.submitButton, (loading || isSubmittingBid) && styles.buttonDisabled]}
                   onPress={handleSubmitBid}
-                  disabled={loading}
+                  disabled={loading || isSubmittingBid}
                 >
                   {loading ? (
                     <ActivityIndicator color="white" />
@@ -1606,6 +1810,22 @@ export function CleanerBiddingScreen({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* Host Profile Modal */}
+      <ProfileViewModal
+        visible={showHostProfileModal && selectedHostProfile !== null}
+        onClose={() => {
+          setShowHostProfileModal(false);
+          setSelectedHostProfile(null);
+          setLoadingHostProfile(false);
+        }}
+        user={selectedHostProfile || {
+          id: '',
+          firstName: '',
+          lastName: '',
+          role: 'host'
+        }}
+      />
     </>
   );
 }
@@ -1887,6 +2107,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    overflow: 'hidden',
+  },
+  hostAvatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   hostAvatarText: {
     fontSize: 16,
@@ -2068,6 +2294,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    overflow: 'hidden',
+  },
+  summaryHostAvatarImage: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
   },
   summaryHostAvatarText: {
     fontSize: 14,
@@ -2874,6 +3106,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    overflow: 'hidden',
+  },
+  pendingBidIconImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  pendingBidIconText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'white',
   },
   pendingBidInfo: {
     flex: 1,
