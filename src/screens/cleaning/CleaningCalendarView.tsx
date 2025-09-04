@@ -17,6 +17,7 @@ import { CleaningJob } from '../../utils/types';
 import { useNavigation } from '@react-navigation/native';
 import ManualCleanForm from '../../components/ManualCleanForm';
 import { Ionicons } from '@expo/vector-icons';
+import { CleaningReportViewer } from '../../components/CleaningReportViewer';
 
 interface CalendarDay {
   date: Date;
@@ -40,6 +41,9 @@ const CleaningCalendarView: React.FC = () => {
   const [showManualCleanForm, setShowManualCleanForm] = useState(false);
   const [manualCleanDate, setManualCleanDate] = useState<Date | undefined>(undefined);
   const [manualCleanAddress, setManualCleanAddress] = useState<string | undefined>(undefined);
+  const [activeTab, setActiveTab] = useState<'upcoming' | 'completed'>('upcoming');
+  const [showCleaningReportModal, setShowCleaningReportModal] = useState(false);
+  const [selectedCleaningForReport, setSelectedCleaningForReport] = useState<CleaningJob | null>(null);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -350,73 +354,176 @@ const CleaningCalendarView: React.FC = () => {
         ))}
       </View>
 
-      {/* Upcoming Cleanings List */}
+      {/* Cleanings Section with Tabs */}
       <View style={styles.upcomingSection}>
-        <Text style={styles.upcomingSectionTitle}>Upcoming Cleanings</Text>
-        {cleaningJobs.length === 0 ? (
-          <Text style={styles.noCleaningsText}>No cleanings scheduled this month</Text>
-        ) : (
-          cleaningJobs.map((cleaning) => (
-            <TouchableOpacity
-              key={cleaning.id}
-              style={[
-                styles.cleaningCard,
-                (cleaning as any).isEmergency && styles.emergencyCleaningCard
-              ]}
-              onPress={() => handleCleaningPress(cleaning)}
-            >
-              <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(cleaning.status) }]} />
-              <View style={styles.cleaningCardContent}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                  {(cleaning as any).isEmergency && (
-                    <View style={styles.emergencyCardIcon}>
-                      <Ionicons name="flash" size={12} color="#DC2626" />
+        {/* Tab Navigation */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'upcoming' && styles.activeTab]}
+            onPress={() => setActiveTab('upcoming')}
+          >
+            <Ionicons 
+              name="calendar" 
+              size={18} 
+              color={activeTab === 'upcoming' ? '#3B82F6' : '#64748B'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'upcoming' && styles.activeTabText]}>
+              Upcoming ({cleaningJobs.filter(job => job.status !== 'completed').length})
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'completed' && styles.activeTab]}
+            onPress={() => setActiveTab('completed')}
+          >
+            <Ionicons 
+              name="checkmark-circle" 
+              size={18} 
+              color={activeTab === 'completed' ? '#10B981' : '#64748B'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'completed' && styles.activeTabText]}>
+              Completed ({cleaningJobs.filter(job => job.status === 'completed').length})
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {activeTab === 'upcoming' ? (
+          /* Upcoming Cleanings Tab */
+          <>
+            <Text style={styles.upcomingSectionTitle}>Upcoming Cleanings</Text>
+            {cleaningJobs.filter(job => job.status !== 'completed').length === 0 ? (
+              <Text style={styles.noCleaningsText}>No upcoming cleanings scheduled this month</Text>
+            ) : (
+              cleaningJobs
+                .filter(job => job.status !== 'completed')
+                .map((cleaning) => (
+                  <TouchableOpacity
+                    key={cleaning.id}
+                    style={[
+                      styles.cleaningCard,
+                      (cleaning as any).isEmergency && styles.emergencyCleaningCard
+                    ]}
+                    onPress={() => handleCleaningPress(cleaning)}
+                  >
+                    <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(cleaning.status) }]} />
+                    <View style={styles.cleaningCardContent}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
+                        {(cleaning as any).isEmergency && (
+                          <View style={styles.emergencyCardIcon}>
+                            <Ionicons name="flash" size={12} color="#DC2626" />
+                          </View>
+                        )}
+                        <Text style={[
+                          styles.cleaningAddress,
+                          (cleaning as any).isEmergency && { color: '#DC2626', fontWeight: '700' }
+                        ]} numberOfLines={1}>
+                          {(cleaning as any).isEmergency ? 'EMERGENCY: ' : ''}{cleaning.address}
+                        </Text>
+                      </View>
+                      <View style={styles.cleaningCardDetails}>
+                        <Text style={[
+                          styles.cleaningDate,
+                          (cleaning as any).isEmergency && { color: '#991B1B', fontWeight: '600' }
+                        ]}>
+                          {new Date(cleaning.preferredDate!).toLocaleDateString()} at {cleaning.preferredTime || '10:00 AM'}
+                        </Text>
+                        <Text style={styles.cleanerAssigned}>
+                          {(cleaning.assignedCleanerName || (cleaning.cleanerFirstName && cleaning.cleanerLastName))
+                            ? (cleaning.assignedCleanerName || `${cleaning.cleanerFirstName} ${cleaning.cleanerLastName}`)
+                            : 'No cleaner assigned'}
+                        </Text>
+                        {cleaning.guestName && (
+                          <Text style={styles.guestInfo}>
+                            Guest: {cleaning.guestName}
+                          </Text>
+                        )}
+                        {(cleaning as any).isEmergency && (cleaning as any).emergencyReason && (
+                          <Text style={styles.emergencyReasonInCard}>
+                            Emergency: {(cleaning as any).emergencyReason}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.cleaningCardFooter}>
+                        <Text style={styles.cleaningType}>{cleaning.cleaningType || 'Standard'}</Text>
+                        {(cleaning as any).isEmergency && (
+                          <Text style={styles.emergencyBadge}>EMERGENCY</Text>
+                        )}
+                        {cleaning.checkOutDate && (
+                          <Text style={styles.checkoutInfo}>
+                            Checkout: {new Date(cleaning.checkOutDate).toLocaleDateString()}
+                          </Text>
+                        )}
+                      </View>
                     </View>
-                  )}
-                  <Text style={[
-                    styles.cleaningAddress,
-                    (cleaning as any).isEmergency && { color: '#DC2626', fontWeight: '700' }
-                  ]} numberOfLines={1}>
-                    {(cleaning as any).isEmergency ? 'EMERGENCY: ' : ''}{cleaning.address}
-                  </Text>
-                </View>
-                <View style={styles.cleaningCardDetails}>
-                  <Text style={[
-                    styles.cleaningDate,
-                    (cleaning as any).isEmergency && { color: '#991B1B', fontWeight: '600' }
-                  ]}>
-                    {new Date(cleaning.preferredDate!).toLocaleDateString()} at {cleaning.preferredTime || '10:00 AM'}
-                  </Text>
-                  <Text style={styles.cleanerAssigned}>
-                    {(cleaning.assignedCleanerName || (cleaning.cleanerFirstName && cleaning.cleanerLastName))
-                      ? (cleaning.assignedCleanerName || `${cleaning.cleanerFirstName} ${cleaning.cleanerLastName}`)
-                      : 'No cleaner assigned'}
-                  </Text>
-                  {cleaning.guestName && (
-                    <Text style={styles.guestInfo}>
-                      Guest: {cleaning.guestName}
-                    </Text>
-                  )}
-                  {(cleaning as any).isEmergency && (cleaning as any).emergencyReason && (
-                    <Text style={styles.emergencyReasonInCard}>
-                      Emergency: {(cleaning as any).emergencyReason}
-                    </Text>
-                  )}
-                </View>
-                <View style={styles.cleaningCardFooter}>
-                  <Text style={styles.cleaningType}>{cleaning.cleaningType || 'Standard'}</Text>
-                  {(cleaning as any).isEmergency && (
-                    <Text style={styles.emergencyBadge}>EMERGENCY</Text>
-                  )}
-                  {cleaning.checkOutDate && (
-                    <Text style={styles.checkoutInfo}>
-                      Checkout: {new Date(cleaning.checkOutDate).toLocaleDateString()}
-                    </Text>
-                  )}
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))
+                  </TouchableOpacity>
+                ))
+            )}
+          </>
+        ) : (
+          /* Completed Cleanings Tab */
+          <>
+            <Text style={styles.upcomingSectionTitle}>Completed Cleanings</Text>
+            {cleaningJobs.filter(job => job.status === 'completed').length === 0 ? (
+              <Text style={styles.noCleaningsText}>No completed cleanings this month</Text>
+            ) : (
+              cleaningJobs
+                .filter(job => job.status === 'completed')
+                .sort((a, b) => (b.completedAt || b.createdAt || 0) - (a.completedAt || a.createdAt || 0))
+                .map((cleaning) => (
+                  <TouchableOpacity
+                    key={cleaning.id}
+                    style={styles.completedCleaningCard}
+                    onPress={() => {
+                      if (cleaning.cleaningPhotos && cleaning.cleaningPhotos.length > 0) {
+                        setSelectedCleaningForReport(cleaning);
+                        setShowCleaningReportModal(true);
+                      } else {
+                        Alert.alert('No Report', 'This cleaning does not have a post-cleaning report.');
+                      }
+                    }}
+                  >
+                    <View style={[styles.statusIndicator, { backgroundColor: getStatusColor(cleaning.status) }]} />
+                    <View style={styles.cleaningCardContent}>
+                      <Text style={styles.cleaningAddress} numberOfLines={1}>
+                        {cleaning.address}
+                      </Text>
+                      <View style={styles.cleaningCardDetails}>
+                        <Text style={styles.cleaningDate}>
+                          Completed: {cleaning.completedAt ? new Date(cleaning.completedAt).toLocaleDateString() : 'Unknown'}
+                        </Text>
+                        <Text style={styles.cleanerAssigned}>
+                          Cleaner: {(cleaning.assignedCleanerName || (cleaning.cleanerFirstName && cleaning.cleanerLastName))
+                            ? (cleaning.assignedCleanerName || `${cleaning.cleanerFirstName} ${cleaning.cleanerLastName}`)
+                            : 'Unknown'}
+                        </Text>
+                        {cleaning.guestName && (
+                          <Text style={styles.guestInfo}>
+                            Guest: {cleaning.guestName}
+                          </Text>
+                        )}
+                        {cleaning.cleaningConcerns && (
+                          <Text style={styles.concernsPreview} numberOfLines={2}>
+                            Concerns: {cleaning.cleaningConcerns}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.cleaningCardFooter}>
+                        <Text style={styles.cleaningType}>{cleaning.cleaningType || 'Standard'}</Text>
+                        <View style={styles.badgeContainer}>
+                          {cleaning.cleaningPhotos && cleaning.cleaningPhotos.length > 0 && (
+                            <View style={styles.reportAvailableBadge}>
+                              <Ionicons name="camera" size={12} color="#10B981" />
+                              <Text style={styles.reportAvailableText}>Report</Text>
+                            </View>
+                          )}
+                          <Text style={styles.completedBadge}>COMPLETED</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))
+            )}
+          </>
         )}
       </View>
 
@@ -489,6 +596,18 @@ const CleaningCalendarView: React.FC = () => {
         selectedDate={manualCleanDate}
         selectedAddress={manualCleanAddress}
       />
+
+      {/* Cleaning Report Viewer */}
+      {selectedCleaningForReport && (
+        <CleaningReportViewer
+          job={selectedCleaningForReport}
+          visible={showCleaningReportModal}
+          onClose={() => {
+            setShowCleaningReportModal(false);
+            setSelectedCleaningForReport(null);
+          }}
+        />
+      )}
     </ScrollView>
   );
 };
@@ -945,6 +1064,85 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginTop: 2,
     fontWeight: '500',
+  },
+  // Tab navigation styles
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    marginBottom: 16,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 8,
+  },
+  activeTab: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  activeTabText: {
+    color: '#3B82F6',
+  },
+  // Completed cleaning card styles
+  completedCleaningCard: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    marginBottom: 10,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  reportAvailableBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  reportAvailableText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#166534',
+  },
+  concernsPreview: {
+    fontSize: 12,
+    color: '#F59E0B',
+    fontStyle: 'italic',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  completedBadge: {
+    backgroundColor: '#10B981',
+    color: 'white',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  badgeContainer: {
+    alignItems: 'flex-end',
+    gap: 4,
   },
 });
 

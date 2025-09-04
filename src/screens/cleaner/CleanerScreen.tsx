@@ -21,6 +21,8 @@ import Map, { Polyline, Marker } from '../../../components/MapComponent';
 import { CleanerBiddingScreen } from './CleanerBiddingScreen';
 import { geocodeAddressCrossPlatform } from '../../services/geocodingService';
 import { geocodeAddressWithFallback } from '../../services/googleGeocodingService';
+import { PostActionPhotoUpload } from '../../components/PostActionPhotoUpload';
+import { CleaningPhoto } from '../../utils/types';
 
 interface CalendarDay {
   date: Date;
@@ -59,6 +61,10 @@ export function CleanerScreen({ navigation, route }: any) {
   
   // Tab state for Active vs Completed jobs
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
+  
+  // Photo upload modal state
+  const [showPhotoUploadModal, setShowPhotoUploadModal] = useState(false);
+  const [jobToComplete, setJobToComplete] = useState<CleaningJob | null>(null);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -207,17 +213,21 @@ export function CleanerScreen({ navigation, route }: any) {
     }
   };
 
-  const handleCompleteJob = async (job: CleaningJob) => {
-    try {
-      const jobRef = doc(db, 'cleaningJobs', job.id);
-      await updateDoc(jobRef, { 
-        status: 'completed',
-        completedAt: Date.now()
-      });
-      Alert.alert('Success', 'Job completed!');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to complete job');
-    }
+  const handleCompleteJob = (job: CleaningJob) => {
+    // Show photo upload modal instead of directly completing
+    setJobToComplete(job);
+    setShowPhotoUploadModal(true);
+  };
+
+  const handlePhotoUploadComplete = (photos: CleaningPhoto[]) => {
+    setShowPhotoUploadModal(false);
+    setJobToComplete(null);
+    Alert.alert('Success', 'Job completed with photos uploaded!');
+  };
+
+  const handlePhotoUploadCancel = () => {
+    setShowPhotoUploadModal(false);
+    setJobToComplete(null);
   };
 
   const handleWithdrawFromJob = async (job: CleaningJob) => {
@@ -1000,6 +1010,16 @@ export function CleanerScreen({ navigation, route }: any) {
             </View>
           </View>
         </Modal>
+
+        {/* Photo Upload Modal */}
+        {showPhotoUploadModal && jobToComplete && user?.uid && (
+          <PostActionPhotoUpload
+            job={jobToComplete}
+            cleanerId={user.uid}
+            onComplete={handlePhotoUploadComplete}
+            onCancel={handlePhotoUploadCancel}
+          />
+        )}
       </View>
     );
   }

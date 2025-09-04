@@ -133,6 +133,22 @@ export interface CleaningJob {
   propertyId?: string;
   guestCheckin?: string;   // Legacy: same as checkInDate
   guestCheckout?: string;  // Legacy: same as checkOutDate
+  
+  // Post-completion photos and report
+  cleaningPhotos?: CleaningPhoto[];
+  cleaningConcerns?: string; // Optional concerns noted by cleaner
+}
+
+// Post-completion cleaning photos
+export interface CleaningPhoto {
+  id: string;
+  jobId: string;
+  cleanerId: string;
+  roomType: 'bedroom' | 'bathroom' | 'kitchen' | 'living_room' | 'dining_room' | 'other';
+  roomNumber?: number; // For multiple rooms of same type (bedroom 1, bedroom 2, etc.)
+  photoUrl: string;
+  uploadedAt: number;
+  description?: string;
 }
 
 // New: Cleaner recruitment posts - for finding cleaners to join the team
@@ -351,4 +367,18 @@ export interface ChatParticipant {
   joinedAt: number;
   lastSeen?: number;
   isOnline?: boolean;
+}
+
+// Enhanced notification type for navigation
+export interface NotificationItem {
+  id: string;
+  userId: string; // recipient user id
+  message: string;
+  createdAt: number;
+  read?: boolean;
+  type?: 'cleaning_concern' | 'general';
+  navigationData?: {
+    screen?: string;
+    params?: any;
+  };
 }

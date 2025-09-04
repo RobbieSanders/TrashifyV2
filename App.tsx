@@ -248,6 +248,7 @@ import { EmergencyCleaningModal } from './src/screens/EmergencyCleaningModal';
 import { ChatButton } from './src/components/ChatButton';
 import { ChatModal } from './src/components/ChatModal';
 import { ChatService } from './src/services/chatService';
+import { CleaningReportViewer } from './src/components/CleaningReportViewer';
 
 // Admin navigation stack
 function AdminStack() {
@@ -4216,45 +4217,125 @@ function TrackScreen({ route, navigation }: any) {
 }
 
 // NOTIFICATIONS SCREEN
-function NotificationsScreen() {
+function NotificationsScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
   const { items, markAllRead } = useNotifications();
   const my = items.filter(i => i.userId === user?.uid);
+  const [selectedJobForReport, setSelectedJobForReport] = useState<any>(null);
+  const [showCleaningReportModal, setShowCleaningReportModal] = useState(false);
 
   useEffect(() => { 
     if (user?.uid) markAllRead(user.uid); 
   }, [user?.uid]);
 
+  const handleNotificationPress = async (notification: any) => {
+    if (notification.type === 'cleaning_concern' && notification.navigationData) {
+      const { params } = notification.navigationData;
+      if (params?.jobId) {
+        try {
+          // Fetch the cleaning job data
+          const jobDoc = await getDoc(doc(db, 'cleaningJobs', params.jobId));
+          if (jobDoc.exists()) {
+            const jobData = { id: jobDoc.id, ...jobDoc.data() };
+            setSelectedJobForReport(jobData);
+            setShowCleaningReportModal(true);
+          } else {
+            Alert.alert('Error', 'Cleaning report not found.');
+          }
+        } catch (error) {
+          console.error('Error fetching cleaning job:', error);
+          Alert.alert('Error', 'Failed to load cleaning report.');
+        }
+      }
+    }
+  };
+
   return (
-    <ScrollView style={[styles.screen, { backgroundColor: '#F3F4F6' }]}
-      contentContainerStyle={{ paddingBottom: 16 }}
-    >
-      <Text style={[styles.title, { marginBottom: 8 }]}>Notifications</Text>
-      {my.map(n => (
-        <View key={n.id} style={[styles.card, { marginBottom: 10 }]}> 
-          <Text style={styles.subtitle}>{n.message}</Text>
-          <Text style={[styles.muted, { fontSize: 12 }]}>{new Date(n.createdAt).toLocaleString()}</Text>
-        </View>
-      ))}
-      {my.length === 0 && (
-        <View style={[styles.card, { alignItems: 'center', padding: 32 }]}>
-          <View style={{
-            backgroundColor: '#E0F2FE',
-            borderRadius: 50,
-            padding: 20,
-            marginBottom: 16,
-          }}>
-            <Ionicons name="notifications-outline" size={40} color="#0284C7" />
+    <>
+      <ScrollView style={[styles.screen, { backgroundColor: '#F3F4F6' }]}
+        contentContainerStyle={{ paddingBottom: 16 }}
+      >
+        <Text style={[styles.title, { marginBottom: 8 }]}>Notifications</Text>
+        {my.map(n => (
+          <TouchableOpacity 
+            key={n.id} 
+            style={[
+              styles.card, 
+              { 
+                marginBottom: 10,
+                borderLeftWidth: n.type === 'cleaning_concern' ? 4 : 0,
+                borderLeftColor: n.type === 'cleaning_concern' ? '#F59E0B' : 'transparent'
+              }
+            ]}
+            onPress={() => handleNotificationPress(n)}
+            activeOpacity={n.type === 'cleaning_concern' ? 0.7 : 1}
+          > 
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+              {n.type === 'cleaning_concern' && (
+                <View style={{
+                  backgroundColor: '#FEF3C7',
+                  borderRadius: 12,
+                  padding: 6,
+                  marginRight: 12,
+                  marginTop: 2,
+                }}>
+                  <Ionicons name="alert-circle" size={16} color="#F59E0B" />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={[
+                  styles.subtitle,
+                  n.type === 'cleaning_concern' && { color: '#92400E', fontWeight: '600' }
+                ]}>
+                  {n.message}
+                </Text>
+                <Text style={[styles.muted, { fontSize: 12, marginTop: 4 }]}>
+                  {new Date(n.createdAt).toLocaleString()}
+                </Text>
+                {n.type === 'cleaning_concern' && (
+                  <Text style={[styles.muted, { fontSize: 11, color: '#F59E0B', marginTop: 4, fontWeight: '600' }]}>
+                    Tap to view report
+                  </Text>
+                )}
+              </View>
+              {n.type === 'cleaning_concern' && (
+                <Ionicons name="chevron-forward" size={16} color="#F59E0B" style={{ marginTop: 2 }} />
+              )}
+            </View>
+          </TouchableOpacity>
+        ))}
+        {my.length === 0 && (
+          <View style={[styles.card, { alignItems: 'center', padding: 32 }]}>
+            <View style={{
+              backgroundColor: '#E0F2FE',
+              borderRadius: 50,
+              padding: 20,
+              marginBottom: 16,
+            }}>
+              <Ionicons name="notifications-outline" size={40} color="#0284C7" />
+            </View>
+            <Text style={[styles.title, { fontSize: 18, marginBottom: 8, textAlign: 'center' }]}>
+              All Caught Up!
+            </Text>
+            <Text style={[styles.muted, { textAlign: 'center' }]}>
+              You have no new notifications at the moment
+            </Text>
           </View>
-          <Text style={[styles.title, { fontSize: 18, marginBottom: 8, textAlign: 'center' }]}>
-            All Caught Up!
-          </Text>
-          <Text style={[styles.muted, { textAlign: 'center' }]}>
-            You have no new notifications at the moment
-          </Text>
-        </View>
+        )}
+      </ScrollView>
+
+      {/* Cleaning Report Modal */}
+      {selectedJobForReport && (
+        <CleaningReportViewer
+          job={selectedJobForReport}
+          visible={showCleaningReportModal}
+          onClose={() => {
+            setShowCleaningReportModal(false);
+            setSelectedJobForReport(null);
+          }}
+        />
       )}
-    </ScrollView>
+    </>
   );
 }
 
