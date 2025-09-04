@@ -1989,7 +1989,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
                   ) : (
                     <>
                       <Ionicons name="sync" size={20} color="#fff" />
-                      <Text style={styles.addButtonText}>Sync All Properties</Text>
+                      <Text style={styles.addButtonText}>Sync iCal on All Properties</Text>
                     </>
                   )}
                 </TouchableOpacity>
