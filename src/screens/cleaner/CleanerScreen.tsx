@@ -23,6 +23,7 @@ import { geocodeAddressCrossPlatform } from '../../services/geocodingService';
 import { geocodeAddressWithFallback } from '../../services/googleGeocodingService';
 import { PostActionPhotoUpload } from '../../components/PostActionPhotoUpload';
 import { CleaningPhoto } from '../../utils/types';
+import { CleaningReportViewer } from '../../components/CleaningReportViewer';
 
 interface CalendarDay {
   date: Date;
@@ -65,6 +66,10 @@ export function CleanerScreen({ navigation, route }: any) {
   // Photo upload modal state
   const [showPhotoUploadModal, setShowPhotoUploadModal] = useState(false);
   const [jobToComplete, setJobToComplete] = useState<CleaningJob | null>(null);
+  
+  // Cleaning report viewer state
+  const [showCleaningReportModal, setShowCleaningReportModal] = useState(false);
+  const [selectedCleaningForReport, setSelectedCleaningForReport] = useState<CleaningJob | null>(null);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -927,7 +932,19 @@ export function CleanerScreen({ navigation, route }: any) {
                       completedJobs
                         .sort((a, b) => (b.completedAt || b.createdAt || 0) - (a.completedAt || a.createdAt || 0))
                         .map(job => (
-                          <View key={job.id} style={styles.completedJobCard}>
+                          <TouchableOpacity
+                            key={job.id}
+                            style={styles.completedJobCard}
+                            onPress={() => {
+                              if (job.cleaningPhotos && job.cleaningPhotos.length > 0) {
+                                setSelectedCleaningForReport(job);
+                                setShowCleaningReportModal(true);
+                              } else {
+                                Alert.alert('No Report', 'This cleaning does not have a post-cleaning report.');
+                              }
+                            }}
+                            activeOpacity={0.7}
+                          >
                             <View style={styles.completedJobHeader}>
                               <View style={styles.completedIconContainer}>
                                 <Ionicons name="checkmark-circle" size={20} color="#10B981" />
@@ -940,12 +957,35 @@ export function CleanerScreen({ navigation, route }: any) {
                                 {job.guestName && (
                                   <Text style={styles.completedJobGuest}>Guest: {job.guestName}</Text>
                                 )}
+                                {job.cleaningConcerns && (
+                                  <Text style={styles.concernsPreview} numberOfLines={2}>
+                                    Concerns: {job.cleaningConcerns}
+                                  </Text>
+                                )}
                               </View>
-                              <View style={styles.completedBadge}>
-                                <Text style={styles.completedBadgeText}>DONE</Text>
+                              <View style={styles.completedBadgeContainer}>
+                                {job.cleaningPhotos && job.cleaningPhotos.length > 0 && (
+                                  <View style={styles.reportAvailableBadge}>
+                                    <Ionicons name="camera" size={12} color="#10B981" />
+                                    <Text style={styles.reportAvailableText}>Report</Text>
+                                  </View>
+                                )}
+                                <View style={styles.completedBadge}>
+                                  <Text style={styles.completedBadgeText}>DONE</Text>
+                                </View>
                               </View>
                             </View>
-                          </View>
+                            {job.cleaningType && (
+                              <View style={styles.completedJobFooter}>
+                                <Text style={styles.cleaningType}>{job.cleaningType}</Text>
+                                {job.cleaningPhotos && job.cleaningPhotos.length > 0 && (
+                                  <Text style={styles.photoCount}>
+                                    {job.cleaningPhotos.length} photo{job.cleaningPhotos.length > 1 ? 's' : ''}
+                                  </Text>
+                                )}
+                              </View>
+                            )}
+                          </TouchableOpacity>
                         ))
                     )}
                   </>
@@ -1018,6 +1058,18 @@ export function CleanerScreen({ navigation, route }: any) {
             cleanerId={user.uid}
             onComplete={handlePhotoUploadComplete}
             onCancel={handlePhotoUploadCancel}
+          />
+        )}
+
+        {/* Cleaning Report Viewer */}
+        {selectedCleaningForReport && (
+          <CleaningReportViewer
+            job={selectedCleaningForReport}
+            visible={showCleaningReportModal}
+            onClose={() => {
+              setShowCleaningReportModal(false);
+              setSelectedCleaningForReport(null);
+            }}
           />
         )}
       </View>
@@ -1328,6 +1380,51 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#166534',
     fontWeight: '700',
+  },
+  completedBadgeContainer: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  reportAvailableBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  reportAvailableText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#166534',
+  },
+  concernsPreview: {
+    fontSize: 12,
+    color: '#F59E0B',
+    fontStyle: 'italic',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  completedJobFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  cleaningType: {
+    fontSize: 11,
+    color: '#64748B',
+    textTransform: 'capitalize',
+  },
+  photoCount: {
+    fontSize: 11,
+    color: '#10B981',
+    fontWeight: '600',
   },
   // Other styles
   overviewGrid: {
