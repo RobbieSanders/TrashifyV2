@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,12 @@ import {
   ScrollView,
   StyleSheet,
   Image,
-  Dimensions
+  Dimensions,
+  ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { reviewService } from '../services/reviewService';
+import { CleanerReview, CleanerReviewStats } from '../utils/types';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -36,6 +39,30 @@ interface ProfileViewModalProps {
 }
 
 export function ProfileViewModal({ visible, onClose, user }: ProfileViewModalProps) {
+  const [reviews, setReviews] = useState<CleanerReview[]>([]);
+  const [reviewStats, setReviewStats] = useState<CleanerReviewStats | null>(null);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+
+  // Load reviews when modal opens for cleaners
+  useEffect(() => {
+    if (visible && user.role === 'cleaner' && user.id) {
+      setLoadingReviews(true);
+      
+      // Load reviews and stats
+      Promise.all([
+        reviewService.getReviewsForCleaner(user.id, 10), // Get latest 10 reviews
+        reviewService.getReviewStats(user.id)
+      ]).then(([reviewsData, statsData]) => {
+        setReviews(reviewsData);
+        setReviewStats(statsData);
+        setLoadingReviews(false);
+      }).catch(error => {
+        console.error('Error loading reviews:', error);
+        setLoadingReviews(false);
+      });
+    }
+  }, [visible, user.role, user.id]);
+
   const displayName = (() => {
     const firstName = user.firstName && typeof user.firstName === 'string' && user.firstName.trim() !== '' && user.firstName !== 'undefined' ? user.firstName.trim() : '';
     const lastName = user.lastName && typeof user.lastName === 'string' && user.lastName.trim() !== '' && user.lastName !== 'undefined' ? user.lastName.trim() : '';
@@ -61,6 +88,22 @@ export function ProfileViewModal({ visible, onClose, user }: ProfileViewModalPro
       return email.charAt(0).toUpperCase();
     }
     return 'U';
+  };
+
+  const renderStars = (rating: number) => {
+    return (
+      <View style={styles.starsContainer}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Ionicons
+            key={star}
+            name={star <= rating ? 'star' : 'star-outline'}
+            size={16}
+            color={star <= rating ? '#FFD700' : '#E5E7EB'}
+            style={{ marginRight: 2 }}
+          />
+        ))}
+      </View>
+    );
   };
 
   return (
@@ -119,6 +162,59 @@ export function ProfileViewModal({ visible, onClose, user }: ProfileViewModalPro
               </View>
             </View>
 
+            {/* Reviews Section for Cleaners */}
+            {user.role === 'cleaner' && (
+              <View style={styles.reviewsSection}>
+                <View style={styles.reviewsHeader}>
+                  <Text style={styles.sectionTitle}>Reviews</Text>
+                  {reviewStats && (
+                    <View style={styles.ratingBadge}>
+                      {renderStars(Math.round(reviewStats.averageRating))}
+                      <Text style={styles.ratingText}>
+                        {reviewStats.averageRating.toFixed(1)} ({reviewStats.totalReviews})
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {loadingReviews ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="#10B981" />
+                    <Text style={styles.loadingText}>Loading reviews...</Text>
+                  </View>
+                ) : reviews.length > 0 ? (
+                  <View style={styles.reviewsList}>
+                    {reviews.slice(0, 5).map((review, index) => (
+                      <View key={review.id} style={styles.reviewCard}>
+                        <View style={styles.reviewHeader}>
+                          <Text style={styles.reviewerName}>{review.hostName}</Text>
+                          {renderStars(review.rating)}
+                        </View>
+                        {review.comment && (
+                          <Text style={styles.reviewComment} numberOfLines={3}>
+                            "{review.comment}"
+                          </Text>
+                        )}
+                        <Text style={styles.reviewDate}>
+                          {new Date(review.createdAt).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    ))}
+                    {reviews.length > 5 && (
+                      <Text style={styles.moreReviewsText}>
+                        +{reviews.length - 5} more reviews
+                      </Text>
+                    )}
+                  </View>
+                ) : (
+                  <View style={styles.noReviewsContainer}>
+                    <Ionicons name="star-outline" size={32} color="#CBD5E1" />
+                    <Text style={styles.noReviewsText}>No reviews yet</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
             {/* About Me Section */}
             {user.aboutMe && typeof user.aboutMe === 'string' && user.aboutMe.trim() !== '' && user.aboutMe !== 'undefined' && (
               <View style={styles.aboutSection}>
@@ -128,7 +224,7 @@ export function ProfileViewModal({ visible, onClose, user }: ProfileViewModalPro
             )}
 
             {/* Empty state when no About Me */}
-            {!user.aboutMe && (
+            {!user.aboutMe && user.role !== 'cleaner' && (
               <View style={styles.emptyAboutSection}>
                 <Ionicons name="person-outline" size={48} color="#CBD5E1" />
                 <Text style={styles.emptyAboutTitle}>No About Me</Text>
@@ -276,5 +372,95 @@ const styles = StyleSheet.create({
     color: '#64748B',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  // Reviews section styles
+  reviewsSection: {
+    marginBottom: 24,
+  },
+  reviewsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  ratingText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#92400E',
+    marginLeft: 6,
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#64748B',
+    marginLeft: 8,
+  },
+  reviewsList: {
+    gap: 12,
+  },
+  reviewCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#10B981',
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  reviewerName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+    flex: 1,
+  },
+  reviewComment: {
+    fontSize: 13,
+    color: '#475569',
+    lineHeight: 18,
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
+  reviewDate: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  moreReviewsText: {
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  noReviewsContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  noReviewsText: {
+    fontSize: 14,
+    color: '#64748B',
+    marginTop: 8,
   },
 });

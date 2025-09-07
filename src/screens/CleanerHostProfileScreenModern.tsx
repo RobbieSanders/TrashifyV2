@@ -125,6 +125,9 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [selectedReviewJob, setSelectedReviewJob] = useState<any>(null);
   const [existingReview, setExistingReview] = useState<CleanerReview | null>(null);
+  const [hostProfilePictures, setHostProfilePictures] = useState<{[hostId: string]: string}>({});
+  const [showAllReviewsModal, setShowAllReviewsModal] = useState(false);
+  const [showAllCompletedBidsModal, setShowAllCompletedBidsModal] = useState(false);
   
   // Get cleaner-specific stats from assigned cleaning jobs
   const assignedJobs = allJobs.filter(job => 
@@ -260,9 +263,34 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       
       const stats = await reviewService.getReviewStats(user.uid);
       setReviewStats(stats);
+      
+      // Load host profile pictures for reviews
+      await loadHostProfilePictures(cleanerReviews);
     } catch (error) {
       console.error('Error loading reviews:', error);
     }
+  };
+
+  // Load host profile pictures for reviews
+  const loadHostProfilePictures = async (reviewsList: CleanerReview[]) => {
+    const hostIds = [...new Set(reviewsList.map(review => review.hostId))];
+    const profilePictures: {[hostId: string]: string} = {};
+    
+    for (const hostId of hostIds) {
+      try {
+        const hostDoc = await getDoc(doc(db, 'users', hostId));
+        if (hostDoc.exists()) {
+          const hostData = hostDoc.data();
+          if (hostData.profilePicture) {
+            profilePictures[hostId] = hostData.profilePicture;
+          }
+        }
+      } catch (error) {
+        console.error('Error loading host profile picture:', error);
+      }
+    }
+    
+    setHostProfilePictures(profilePictures);
   };
 
   // Subscribe to review updates
@@ -1846,6 +1874,183 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       fontWeight: '600',
       marginLeft: 4,
     },
+    // New review card styles
+    reviewCard: {
+      backgroundColor: '#FFFFFF',
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: '#E2E8F0',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    reviewCardHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    reviewerInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+    },
+    reviewerAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: '#10B981',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+    },
+    reviewerInitial: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    reviewerDetails: {
+      flex: 1,
+    },
+    reviewerName: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#0F172A',
+      marginBottom: 2,
+    },
+    reviewDate: {
+      fontSize: 12,
+      color: '#64748B',
+    },
+    reviewRating: {
+      alignItems: 'flex-end',
+    },
+    starsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
+    ratingNumber: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: '#0F172A',
+    },
+    reviewCommentContainer: {
+      backgroundColor: '#F8FAFC',
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 8,
+      borderLeftWidth: 3,
+      borderLeftColor: '#10B981',
+    },
+    reviewComment: {
+      fontSize: 14,
+      color: '#475569',
+      lineHeight: 20,
+      fontStyle: 'italic',
+    },
+    reviewPropertyInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    reviewPropertyText: {
+      fontSize: 12,
+      color: '#64748B',
+      marginLeft: 6,
+    },
+    viewAllReviewsButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#F0FDF4',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#BBF7D0',
+      marginTop: 8,
+    },
+    viewAllReviewsText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#10B981',
+      marginLeft: 6,
+    },
+    // New review stats styles
+    reviewStatsCard: {
+      backgroundColor: '#FFFBEB',
+      borderRadius: 16,
+      padding: 20,
+      marginBottom: 20,
+      borderWidth: 2,
+      borderColor: '#FDE68A',
+    },
+    reviewStatsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 24,
+    },
+    overallRatingDisplay: {
+      alignItems: 'center',
+      flex: 1,
+    },
+    overallRatingNumber: {
+      fontSize: 48,
+      fontWeight: '800',
+      color: '#92400E',
+      marginBottom: 8,
+    },
+    overallStarsContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    totalReviewsText: {
+      fontSize: 13,
+      color: '#92400E',
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    ratingBreakdown: {
+      flex: 1,
+      gap: 8,
+    },
+    ratingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    ratingRowLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: '#92400E',
+      width: 12,
+    },
+    ratingProgressTrack: {
+      flex: 1,
+      height: 8,
+      backgroundColor: '#FEF3C7',
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    ratingProgressFill: {
+      height: '100%',
+      backgroundColor: '#F59E0B',
+      borderRadius: 4,
+      maxWidth: '100%',
+    },
+    ratingRowCount: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: '#92400E',
+      width: 20,
+      textAlign: 'right',
+    },
   });
 
   return (
@@ -2058,125 +2263,128 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
                 </View>
               ) : (
                 <>
-                  {/* Review Stats Summary */}
+                  {/* Review Stats Summary - New Design */}
                   {reviewStats && (
-                    <View style={{ 
-                      backgroundColor: '#f8f9fa', 
-                      borderRadius: 12, 
-                      padding: 16, 
-                      marginBottom: 16 
-                    }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-                        {[5, 4, 3, 2, 1].map(rating => {
-                          const count = reviewStats[`${['one', 'two', 'three', 'four', 'five'][rating - 1]}StarCount` as keyof CleanerReviewStats] as number || 0;
-                          const percentage = reviewStats.totalReviews > 0 ? (count / reviewStats.totalReviews) * 100 : 0;
-                          
-                          return (
-                            <View key={rating} style={{ alignItems: 'center' }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                <Text style={{ fontSize: 12, color: '#666', marginRight: 2 }}>{rating}</Text>
-                                <Ionicons name="star" size={12} color="#FFD700" />
-                              </View>
-                              <View style={{ 
-                                width: 40, 
-                                height: 60, 
-                                backgroundColor: '#e0e0e0', 
-                                borderRadius: 4,
-                                overflow: 'hidden',
-                                transform: [{ rotate: '180deg' }]
-                              }}>
-                                <View style={{ 
-                                  width: '100%', 
-                                  height: `${percentage}%`, 
-                                  backgroundColor: '#10B981' 
-                                }} />
-                              </View>
-                              <Text style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
-                                {count}
-                              </Text>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    </View>
-                  )}
-                  
-                  {/* Review List */}
-                  {reviews.slice(0, 5).map((review) => (
-                    <View key={review.id} style={[styles.propertyCard, { marginBottom: 12 }]}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <View>
-                          <Text style={{ fontSize: 14, fontWeight: '600', color: '#1a1a1a' }}>
-                            {review.hostName}
+                    <TouchableOpacity 
+                      style={styles.reviewStatsCard}
+                      onPress={() => setShowAllReviewsModal(true)}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.reviewStatsHeader}>
+                        <View style={styles.overallRatingDisplay}>
+                          <Text style={styles.overallRatingNumber}>
+                            {reviewStats.averageRating.toFixed(1)}
                           </Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                          <View style={styles.overallStarsContainer}>
                             {[1, 2, 3, 4, 5].map(star => (
                               <Ionicons 
                                 key={star} 
-                                name={star <= review.rating ? "star" : "star-outline"} 
-                                size={14} 
+                                name={star <= Math.round(reviewStats.averageRating) ? "star" : "star-outline"} 
+                                size={18} 
                                 color="#FFD700" 
+                                style={{ marginRight: 2 }}
                               />
                             ))}
-                            <Text style={{ fontSize: 11, color: '#666', marginLeft: 8 }}>
+                          </View>
+                          <Text style={styles.totalReviewsText}>
+                            Based on {reviewStats.totalReviews} review{reviewStats.totalReviews !== 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                        
+                        <View style={styles.ratingBreakdown}>
+                          {[5, 4, 3, 2, 1].map(rating => {
+                            const count = reviewStats[`${['one', 'two', 'three', 'four', 'five'][rating - 1]}StarCount` as keyof CleanerReviewStats] as number || 0;
+                            const percentage = reviewStats.totalReviews > 0 ? (count / reviewStats.totalReviews) * 100 : 0;
+                            
+                            return (
+                              <View key={rating} style={styles.ratingRow}>
+                                <Text style={styles.ratingRowLabel}>{rating}</Text>
+                                <Ionicons name="star" size={12} color="#FFD700" />
+                                <View style={styles.ratingProgressTrack}>
+                                  <View style={[styles.ratingProgressFill, { width: `${percentage}%` }]} />
+                                </View>
+                                <Text style={styles.ratingRowCount}>{count}</Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                  
+                  {/* Review List - Show only last 5 reviews */}
+                  {reviews.slice(0, 5).map((review) => (
+                    <View key={review.id} style={styles.reviewCard}>
+                      <View style={styles.reviewCardHeader}>
+                        <View style={styles.reviewerInfo}>
+                          <View style={styles.reviewerAvatar}>
+                            {hostProfilePictures[review.hostId] ? (
+                              <Image
+                                source={{ uri: hostProfilePictures[review.hostId] }}
+                                style={{
+                                  width: 40,
+                                  height: 40,
+                                  borderRadius: 20,
+                                }}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <Text style={styles.reviewerInitial}>
+                                {review.hostName.charAt(0).toUpperCase()}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={styles.reviewerDetails}>
+                            <Text style={styles.reviewerName}>
+                              {review.hostName}
+                            </Text>
+                            <Text style={styles.reviewDate}>
                               {new Date(review.createdAt).toLocaleDateString()}
                             </Text>
                           </View>
                         </View>
-                        {review.canEdit && review.editCount < 10 && (
-                          <TouchableOpacity
-                            onPress={async () => {
-                              // Find the cleaning job for this review
-                              const job = allJobs.find(j => j.id === review.cleaningJobId);
-                              if (job) {
-                                setSelectedReviewJob(job);
-                                setExistingReview(review);
-                                setShowReviewModal(true);
-                              }
-                            }}
-                            style={{
-                              backgroundColor: '#E3F2FD',
-                              paddingHorizontal: 12,
-                              paddingVertical: 6,
-                              borderRadius: 6,
-                            }}
-                          >
-                            <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
-                              Edit
-                            </Text>
-                          </TouchableOpacity>
-                        )}
+                        <View style={styles.reviewRating}>
+                          <View style={styles.starsRow}>
+                            {[1, 2, 3, 4, 5].map(star => (
+                              <Ionicons 
+                                key={star} 
+                                name={star <= review.rating ? "star" : "star-outline"} 
+                                size={16} 
+                                color="#FFD700" 
+                                style={{ marginRight: 1 }}
+                              />
+                            ))}
+                          </View>
+                          <Text style={styles.ratingNumber}>
+                            {review.rating}.0
+                          </Text>
+                        </View>
                       </View>
                       
                       {review.comment && (
-                        <Text style={{ fontSize: 13, color: '#475569', lineHeight: 18 }}>
-                          {review.comment}
-                        </Text>
-                      )}
-                      
-                      {review.propertyAddress && (
-                        <Text style={{ fontSize: 11, color: '#64748B', marginTop: 8 }}>
-                          Property: {review.propertyAddress}
-                        </Text>
-                      )}
-                      
-                      {review.editCount > 0 && (
-                        <Text style={{ fontSize: 10, color: '#64748B', marginTop: 4, fontStyle: 'italic' }}>
-                          Edited {review.editCount} time{review.editCount !== 1 ? 's' : ''}
-                        </Text>
+                        <View style={styles.reviewCommentContainer}>
+                          <Text style={styles.reviewComment}>
+                            "{review.comment}"
+                          </Text>
+                        </View>
                       )}
                     </View>
                   ))}
                   
                   {reviews.length > 5 && (
                     <TouchableOpacity 
-                      style={{ alignItems: 'center', paddingVertical: 12 }}
+                      style={styles.viewAllReviewsButton}
                       onPress={() => {
-                        // Navigate to full reviews screen or expand
-                        Alert.alert('Reviews', `You have ${reviews.length} total reviews`);
+                        // Show modal with all reviews
+                        Alert.alert(
+                          'All Reviews', 
+                          `You have ${reviews.length} total reviews. Here are your latest reviews displayed above.`,
+                          [{ text: 'OK' }]
+                        );
                       }}
                     >
-                      <Text style={{ fontSize: 14, color: '#1E88E5', fontWeight: '600' }}>
+                      <Ionicons name="eye-outline" size={16} color="#10B981" />
+                      <Text style={styles.viewAllReviewsText}>
                         View All {reviews.length} Reviews
                       </Text>
                     </TouchableOpacity>
@@ -2334,7 +2542,11 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
             </View>
             
             {/* Completed Bids Section */}
-            <View style={styles.sectionCard}>
+            <TouchableOpacity 
+              style={styles.sectionCard}
+              onPress={() => setShowAllCompletedBidsModal(true)}
+              activeOpacity={0.8}
+            >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <Text style={styles.sectionTitle}>Completed Bids</Text>
                 {(() => {
@@ -2342,15 +2554,12 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
                   const completedEmergencyBids = myEmergencyBids.filter((bid: any) => bid.status === 'accepted');
                   const totalCompleted = completedRegularBids.length + completedEmergencyBids.length;
                   
-                  return totalCompleted > 2 && (
-                    <TouchableOpacity 
-                      style={styles.viewAllButton}
-                      onPress={() => setShowAllCompletedBids(!showAllCompletedBids)}
-                    >
-                      <Text style={styles.viewAllText}>
-                        {showAllCompletedBids ? 'Show Less' : `View All (${totalCompleted})`}
+                  return (
+                    <View style={[styles.pendingBadge, { backgroundColor: '#10B981' }]}>
+                      <Text style={styles.pendingBadgeText}>
+                        {totalCompleted} COMPLETED
                       </Text>
-                    </TouchableOpacity>
+                    </View>
                   );
                 })()}
               </View>
@@ -2376,8 +2585,8 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
                   ...completedRegularBids.map(bid => ({ ...bid, type: 'regular' }))
                 ].sort((a, b) => (b.bidDate || 0) - (a.bidDate || 0));
 
-                // Show only 2 items initially, or all if expanded
-                const bidsToShow = showAllCompletedBids ? allCompletedBids : allCompletedBids.slice(0, 2);
+                // Show only first 3 items
+                const bidsToShow = allCompletedBids.slice(0, 3);
 
                 return bidsToShow.map((bid) => {
                   const isEmergency = bid.type === 'emergency';
@@ -2456,73 +2665,7 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
                   );
                 });
               })()}
-            </View>
-
-            {/* Other Upcoming Services Section */}
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Other Upcoming Services</Text>
-              {(() => {
-                const nextWeek = new Date();
-                nextWeek.setDate(nextWeek.getDate() + 7);
-                const nextMonth = new Date();
-                nextMonth.setDate(nextMonth.getDate() + 30);
-                
-                const otherServices = assignedJobs.filter(job => {
-                  if (!job.preferredDate) return false;
-                  const jobDate = new Date(job.preferredDate);
-                  return jobDate > nextWeek && jobDate <= nextMonth && 
-                         (job.status === 'assigned' || job.status === 'in_progress' || job.status === 'scheduled');
-                }).sort((a, b) => (a.preferredDate || 0) - (b.preferredDate || 0));
-
-                if (otherServices.length === 0) {
-                  return (
-                    <View style={styles.emptyState}>
-                      <View style={styles.emptyIcon}>
-                        <Ionicons name="calendar-outline" size={40} color="#999" />
-                      </View>
-                      <Text style={styles.emptyText}>No other upcoming services</Text>
-                      <Text style={styles.emptySubtext}>Services beyond next week will appear here</Text>
-                    </View>
-                  );
-                }
-
-                return otherServices.slice(0, 5).map((job) => (
-                  <View key={job.id} style={[styles.propertyCard, { marginBottom: 8, padding: 12 }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <View style={[styles.closeButton, { 
-                        backgroundColor: job.isEmergency ? '#DC2626' : '#64748B',
-                        marginRight: 12,
-                        width: 24,
-                        height: 24
-                      }]}>
-                        <Ionicons name={job.isEmergency ? "flash" : "calendar"} size={12} color="white" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.propertyLabel, { fontSize: 14 }]}>{job.address}</Text>
-                        <Text style={[styles.propertyAddress, { fontSize: 12 }]}>
-                          {job.preferredDate ? new Date(job.preferredDate).toLocaleDateString() : 'No date'} at {job.preferredTime || '10:00 AM'}
-                        </Text>
-                        {job.isEmergency && (
-                          <Text style={[styles.propertyAddress, { fontSize: 11, color: '#DC2626', fontWeight: '600' }]}>
-                            EMERGENCY CLEANING
-                          </Text>
-                        )}
-                      </View>
-                      <Text style={[styles.propertyAddress, { fontSize: 11, color: '#64748B' }]}>
-                        {job.status.toUpperCase()}
-                      </Text>
-                    </View>
-                  </View>
-                ));
-              })()}
-            </View>
-
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Recent Activity</Text>
-              <Text style={{ color: '#666', fontSize: 14 }}>
-                You have {activeJobs} active jobs and have completed {completedJobs} jobs.
-              </Text>
-            </View>
+            </TouchableOpacity>
           </Animated.View>
         ) : null}
         
@@ -3359,6 +3502,260 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
                     </View>
                   </>
                 );
+              })()}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* All Reviews Modal */}
+      <Modal
+        visible={showAllReviewsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAllReviewsModal(false)}
+      >
+        <View style={styles.modal}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>All Reviews ({reviews.length})</Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowAllReviewsModal(false)}
+              >
+                <Ionicons name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {reviewStats && (
+                <View style={[styles.reviewStatsCard, { marginBottom: 16 }]}>
+                  <View style={styles.reviewStatsHeader}>
+                    <View style={styles.overallRatingDisplay}>
+                      <Text style={styles.overallRatingNumber}>
+                        {reviewStats.averageRating.toFixed(1)}
+                      </Text>
+                      <View style={styles.overallStarsContainer}>
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <Ionicons 
+                            key={star} 
+                            name={star <= Math.round(reviewStats.averageRating) ? "star" : "star-outline"} 
+                            size={18} 
+                            color="#FFD700" 
+                            style={{ marginRight: 2 }}
+                          />
+                        ))}
+                      </View>
+                      <Text style={styles.totalReviewsText}>
+                        Based on {reviewStats.totalReviews} review{reviewStats.totalReviews !== 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                    
+                    <View style={styles.ratingBreakdown}>
+                      {[5, 4, 3, 2, 1].map(rating => {
+                        const count = reviewStats[`${['one', 'two', 'three', 'four', 'five'][rating - 1]}StarCount` as keyof CleanerReviewStats] as number || 0;
+                        const percentage = reviewStats.totalReviews > 0 ? (count / reviewStats.totalReviews) * 100 : 0;
+                        
+                        return (
+                          <View key={rating} style={styles.ratingRow}>
+                            <Text style={styles.ratingRowLabel}>{rating}</Text>
+                            <Ionicons name="star" size={12} color="#FFD700" />
+                            <View style={styles.ratingProgressTrack}>
+                              <View style={[styles.ratingProgressFill, { width: `${percentage}%` }]} />
+                            </View>
+                            <Text style={styles.ratingRowCount}>{count}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </View>
+              )}
+              
+              {reviews.map((review) => (
+                <View key={review.id} style={[styles.reviewCard, { marginBottom: 12 }]}>
+                  <View style={styles.reviewCardHeader}>
+                    <View style={styles.reviewerInfo}>
+                      <View style={styles.reviewerAvatar}>
+                        {hostProfilePictures[review.hostId] ? (
+                          <Image
+                            source={{ uri: hostProfilePictures[review.hostId] }}
+                            style={{
+                              width: 40,
+                              height: 40,
+                              borderRadius: 20,
+                            }}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Text style={styles.reviewerInitial}>
+                            {review.hostName.charAt(0).toUpperCase()}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.reviewerDetails}>
+                        <Text style={styles.reviewerName}>
+                          {review.hostName}
+                        </Text>
+                        <Text style={styles.reviewDate}>
+                          {new Date(review.createdAt).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.reviewRating}>
+                      <View style={styles.starsRow}>
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <Ionicons 
+                            key={star} 
+                            name={star <= review.rating ? "star" : "star-outline"} 
+                            size={16} 
+                            color="#FFD700" 
+                            style={{ marginRight: 1 }}
+                          />
+                        ))}
+                      </View>
+                      <Text style={styles.ratingNumber}>
+                        {review.rating}.0
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  {review.comment && (
+                    <View style={styles.reviewCommentContainer}>
+                      <Text style={styles.reviewComment}>
+                        "{review.comment}"
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* All Completed Bids Modal */}
+      <Modal
+        visible={showAllCompletedBidsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAllCompletedBidsModal(false)}
+      >
+        <View style={styles.modal}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>All Completed Bids ({(() => {
+                const completedRegularBids = myBids.filter(bid => bid.status === 'accepted');
+                const completedEmergencyBids = myEmergencyBids.filter((bid: any) => bid.status === 'accepted');
+                return completedRegularBids.length + completedEmergencyBids.length;
+              })()})</Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowAllCompletedBidsModal(false)}
+              >
+                <Ionicons name="close" size={20} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {(() => {
+                const completedRegularBids = myBids.filter(bid => bid.status === 'accepted');
+                const completedEmergencyBids = myEmergencyBids.filter((bid: any) => bid.status === 'accepted');
+                
+                if (completedRegularBids.length === 0 && completedEmergencyBids.length === 0) {
+                  return (
+                    <View style={styles.emptyState}>
+                      <View style={styles.emptyIcon}>
+                        <Ionicons name="checkmark-circle-outline" size={40} color="#999" />
+                      </View>
+                      <Text style={styles.emptyText}>No completed bids yet</Text>
+                      <Text style={styles.emptySubtext}>Your accepted and completed bids will appear here</Text>
+                    </View>
+                  );
+                }
+
+                const allCompletedBids = [
+                  ...completedEmergencyBids.map(bid => ({ ...bid, type: 'emergency' })),
+                  ...completedRegularBids.map(bid => ({ ...bid, type: 'regular' }))
+                ].sort((a, b) => (b.bidDate || 0) - (a.bidDate || 0));
+
+                return allCompletedBids.map((bid) => {
+                  const isEmergency = bid.type === 'emergency';
+                  const recruitment = isEmergency ? null : openRecruitments.find(r => r.id === bid.recruitmentId);
+                  
+                  return (
+                    <View key={`${bid.type}-${bid.id}`} style={[
+                      styles.propertyCard,
+                      { marginBottom: 12 },
+                      isEmergency && { 
+                        borderColor: '#DC2626', 
+                        borderWidth: 2, 
+                        backgroundColor: '#FEF2F2',
+                        shadowColor: '#DC2626',
+                        shadowOpacity: 0.15,
+                        shadowRadius: 8,
+                        elevation: 6
+                      }
+                    ]}>
+                      <View style={styles.propertyHeader}>
+                        <View style={styles.propertyInfo}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                            <View style={[styles.closeButton, { 
+                              backgroundColor: isEmergency ? '#DC2626' : '#10B981', 
+                              marginRight: 8, 
+                              width: 24, 
+                              height: 24 
+                            }]}>
+                              <Ionicons 
+                                name={isEmergency ? "flash" : "people"} 
+                                size={12} 
+                                color="white" 
+                              />
+                            </View>
+                            <Text style={[
+                              styles.propertyLabel, 
+                              isEmergency && { color: '#DC2626', fontWeight: '700' }
+                            ]}>
+                              {isEmergency ? 'EMERGENCY CLEANING' : 'TEAM APPLICATION'}
+                            </Text>
+                          </View>
+                          <Text style={[
+                            styles.propertyAddress, 
+                            isEmergency && { color: '#991B1B' }
+                          ]}>
+                            {isEmergency 
+                              ? 'Emergency cleaning job' 
+                              : recruitment 
+                                ? `${recruitment.hostName}'s Team` 
+                                : 'Team application'
+                            }
+                          </Text>
+                          <Text style={[styles.propertyAddress, { 
+                            fontSize: 12, 
+                            color: isEmergency ? '#991B1B' : '#10B981', 
+                            fontWeight: '600' 
+                          }]}>
+                            ${bid.flatFee || 0}{isEmergency ? '/job' : '/job'} • {bid.status === 'accepted' ? 'Accepted' : 'Completed'}
+                          </Text>
+                          <Text style={[styles.propertyAddress, { fontSize: 11, color: '#64748B' }]}>
+                            Applied {new Date(bid.bidDate).toLocaleDateString()}
+                          </Text>
+                        </View>
+                        <View style={[styles.closeButton, { 
+                          backgroundColor: bid.status === 'completed' ? '#10B981' : '#059669',
+                          width: 32,
+                          height: 32
+                        }]}>
+                          <Ionicons 
+                            name="checkmark-circle" 
+                            size={16} 
+                            color="white" 
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  );
+                });
               })()}
             </ScrollView>
           </View>
