@@ -961,19 +961,27 @@ export function subscribeToFilteredRecruitmentsWithProfiles(
   });
 }
 
-// Enhanced subscription to include cleaner profile data in bids
+// Enhanced subscription to include cleaner profile data and review stats in bids
 export function subscribeToBidsWithProfiles(
   recruitmentId: string, 
-  callback: (bids: (CleanerBid & { cleanerProfile?: UserProfile })[]) => void
+  callback: (bids: (CleanerBid & { cleanerProfile?: UserProfile; reviewStats?: any })[]) => void
 ) {
   return subscribeToBids(recruitmentId, async (bids) => {
-    // Fetch cleaner profiles for each bid
+    // Import review service dynamically to avoid circular dependencies
+    const { reviewService } = await import('./reviewService');
+    
+    // Fetch cleaner profiles and review stats for each bid
     const bidsWithProfiles = await Promise.all(
       bids.map(async (bid) => {
-        const cleanerProfile = await getUserProfile(bid.cleanerId);
+        const [cleanerProfile, reviewStats] = await Promise.all([
+          getUserProfile(bid.cleanerId),
+          reviewService.getReviewStats(bid.cleanerId)
+        ]);
+        
         return {
           ...bid,
-          cleanerProfile: cleanerProfile || undefined
+          cleanerProfile: cleanerProfile || undefined,
+          reviewStats: reviewStats || undefined
         };
       })
     );

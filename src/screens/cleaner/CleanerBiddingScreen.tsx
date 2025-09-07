@@ -33,6 +33,8 @@ import { calculateDistanceGoogle } from '../../services/googleGeocodingService';
 import { ProfileViewModal } from '../../components/ProfileViewModal';
 import { ChatService } from '../../services/chatService';
 import { ChatModal } from '../../components/ChatModal';
+import { reviewService } from '../../services/reviewService';
+import { CleanerReviewStats } from '../../utils/types';
 
 const { width } = Dimensions.get('window');
 
@@ -70,6 +72,30 @@ export function CleanerBiddingScreen({ navigation }: any) {
   const [showHostProfileModal, setShowHostProfileModal] = useState(false);
   const [selectedHostProfile, setSelectedHostProfile] = useState<UserProfile | null>(null);
   const [loadingHostProfile, setLoadingHostProfile] = useState(false);
+  
+  // Review stats state
+  const [bidReviewStats, setBidReviewStats] = useState<{[cleanerId: string]: CleanerReviewStats}>({});
+  
+  // Load review stats for the current user (cleaner)
+  useEffect(() => {
+    if (!user?.uid) return;
+    
+    const loadCleanerReviewStats = async () => {
+      try {
+        const stats = await reviewService.getReviewStats(user.uid);
+        if (stats) {
+          setBidReviewStats(prev => ({
+            ...prev,
+            [user.uid]: stats
+          }));
+        }
+      } catch (error) {
+        console.error('Error loading cleaner review stats:', error);
+      }
+    };
+    
+    loadCleanerReviewStats();
+  }, [user?.uid]);
 
   // Availability options
   const availabilityOptions = [
@@ -273,6 +299,13 @@ export function CleanerBiddingScreen({ navigation }: any) {
       const cleanerName = (user?.firstName && user?.lastName) 
         ? `${user.firstName} ${user.lastName}`.trim()
         : user?.firstName || user?.lastName || user?.email?.split('@')[0] || 'Cleaner';
+      
+      // Get current review stats for the bid
+      const reviewStats = await reviewService.getReviewStats(user!.uid);
+      if (reviewStats) {
+        bidData.rating = reviewStats.averageRating;
+        bidData.completedJobs = reviewStats.totalReviews; // Use actual review count
+      }
       
       await submitBid(
         selectedRecruitment!.id,
@@ -902,16 +935,18 @@ export function CleanerBiddingScreen({ navigation }: any) {
                             )
                           }
                         </Text>
-                        <TouchableOpacity 
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            handleShowHostProfile(recruitment.hostId);
-                          }}
-                        >
-                          <Text style={[styles.hostName, { textDecorationLine: 'underline' }]}>
-                            by {recruitment.hostName}
-                          </Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                          <TouchableOpacity 
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleShowHostProfile(recruitment.hostId);
+                            }}
+                          >
+                            <Text style={[styles.hostName, { textDecorationLine: 'underline' }]}>
+                              by {recruitment.hostName}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     </View>
                     <View style={styles.cardHeaderRight}>
@@ -1445,6 +1480,37 @@ export function CleanerBiddingScreen({ navigation }: any) {
               <View style={styles.formSection}>
                 <Text style={styles.formSectionTitle}>Your Proposal</Text>
                 
+                {/* Display cleaner's review stats if available */}
+                {(() => {
+                  const stats = bidReviewStats[user?.uid || ''];
+                  if (stats && stats.totalReviews > 0) {
+                    return (
+                      <View style={styles.reviewStatsCard}>
+                        <View style={styles.reviewStatsHeader}>
+                          <View style={styles.reviewRating}>
+                            <Ionicons name="star" size={16} color="#FFD700" />
+                            <Text style={styles.reviewRatingText}>{stats.averageRating.toFixed(1)}</Text>
+                          </View>
+                          <Text style={styles.reviewCount}>
+                            {stats.totalReviews} review{stats.totalReviews !== 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                        <Text style={styles.reviewStatsNote}>
+                          Your rating will be included with your application
+                        </Text>
+                      </View>
+                    );
+                  } else {
+                    return (
+                      <View style={[styles.reviewStatsCard, { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' }]}>
+                        <Text style={[styles.reviewStatsNote, { color: '#64748B', fontStyle: 'normal' }]}>
+                          No reviews yet! Complete cleanings to build your reputation.
+                        </Text>
+                      </View>
+                    );
+                  }
+                })()}
+                
                 <Text style={styles.label}>Rate Per Job *</Text>
                 <View style={styles.rateInputContainer}>
                   <View style={styles.rateInput}>
@@ -1935,6 +2001,32 @@ export function CleanerBiddingScreen({ navigation }: any) {
     </>
   );
 }
+
+// Add a component to display review stats inline
+const ReviewStatsBadge = ({ cleanerId }: { cleanerId: string }) => {
+  const [stats, setStats] = React.useState<CleanerReviewStats | null>(null);
+  
+  React.useEffect(() => {
+    reviewService.getReviewStats(cleanerId).then(setStats);
+  }, [cleanerId]);
+  
+  if (!stats || stats.totalReviews === 0) {
+    return (
+      <View style={styles.reviewBadge}>
+        <Text style={styles.noReviewsText}>No reviews yet!</Text>
+      </View>
+    );
+  }
+  
+  return (
+    <View style={styles.reviewBadge}>
+      <Ionicons name="star" size={12} color="#FFD700" />
+      <Text style={styles.reviewBadgeText}>
+        {stats.averageRating.toFixed(1)} ({stats.totalReviews} review{stats.totalReviews !== 1 ? 's' : ''})
+      </Text>
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -3292,5 +3384,60 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 4,
+  },
+  // Review stats styles
+  reviewStatsCard: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  reviewStatsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  reviewRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  reviewRatingText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#15803D',
+    marginLeft: 4,
+  },
+  reviewCount: {
+    fontSize: 13,
+    color: '#166534',
+    fontWeight: '600',
+  },
+  reviewStatsNote: {
+    fontSize: 11,
+    color: '#166534',
+    fontStyle: 'italic',
+  },
+  reviewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  reviewBadgeText: {
+    fontSize: 11,
+    color: '#475569',
+    marginLeft: 4,
+    fontWeight: '600',
+  },
+  noReviewsText: {
+    fontSize: 11,
+    color: '#64748B',
+    fontStyle: 'italic',
   },
 });

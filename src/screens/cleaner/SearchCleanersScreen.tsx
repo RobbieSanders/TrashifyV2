@@ -35,6 +35,8 @@ import { db } from '../../utils/firebase';
 import { ProfileViewModal } from '../../components/ProfileViewModal';
 import { EmergencyCleaningModal } from '../EmergencyCleaningModal';
 import { BidsModalDebugger } from '../../components/BidsModalDebugger';
+import { reviewService } from '../../services/reviewService';
+import { CleanerReviewStats } from '../../utils/types';
 
 export function SearchCleanersScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
@@ -1444,7 +1446,21 @@ export function SearchCleanersScreen({ navigation }: any) {
                           </Text>
                         </View>
 
-                        {ratingText && (
+                        {/* Display review stats if available */}
+                        {(bid as any).reviewStats ? (
+                          <View style={styles.bidInfo}>
+                            <Ionicons name="star" size={16} color="#F59E0B" />
+                            <Text style={styles.bidInfoText}>
+                              {(bid as any).reviewStats.averageRating.toFixed(1)} ({(bid as any).reviewStats.totalReviews} review{(bid as any).reviewStats.totalReviews !== 1 ? 's' : ''})
+                            </Text>
+                          </View>
+                        ) : (bid as any).reviewStats === null ? (
+                          <View style={styles.bidInfo}>
+                            <Text style={[styles.bidInfoText, { fontStyle: 'italic' }]}>
+                              No reviews yet!
+                            </Text>
+                          </View>
+                        ) : ratingText && (
                           <View style={styles.bidInfo}>
                             <Ionicons name="star" size={16} color="#F59E0B" />
                             <Text style={styles.bidInfoText}>

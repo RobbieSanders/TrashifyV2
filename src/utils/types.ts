@@ -376,9 +376,59 @@ export interface NotificationItem {
   message: string;
   createdAt: number;
   read?: boolean;
-  type?: 'cleaning_concern' | 'general';
+  type?: 'cleaning_concern' | 'general' | 'review_request';
   navigationData?: {
     screen?: string;
     params?: any;
   };
+}
+
+// Review system types
+export interface CleanerReview {
+  id: string;
+  cleanerId: string;
+  cleanerName: string;
+  hostId: string;
+  hostName: string;
+  cleaningJobId?: string; // Made optional - not always available when reviewing from profile
+  propertyAddress?: string;
+  
+  // Review content
+  rating: number; // 1-5 stars
+  comment?: string;
+  
+  // Review metadata
+  createdAt: number;
+  updatedAt?: number;
+  editCount: number; // Track how many times this review has been edited
+  canEdit: boolean; // False after 10 total reviews for this cleaner
+  
+  // Review categories (optional detailed ratings)
+  qualityRating?: number; // 1-5
+  punctualityRating?: number; // 1-5
+  communicationRating?: number; // 1-5
+  professionalismRating?: number; // 1-5
+}
+
+export interface CleanerReviewStats {
+  cleanerId: string;
+  totalReviews: number;
+  averageRating: number;
+  
+  // Breakdown by rating
+  fiveStarCount: number;
+  fourStarCount: number;
+  threeStarCount: number;
+  twoStarCount: number;
+  oneStarCount: number;
+  
+  // Category averages (if using detailed ratings)
+  averageQualityRating?: number;
+  averagePunctualityRating?: number;
+  averageCommunicationRating?: number;
+  averageProfessionalismRating?: number;
+  
+  // Recent trend
+  lastMonthAverage?: number;
+  trend?: 'improving' | 'declining' | 'stable';
 }

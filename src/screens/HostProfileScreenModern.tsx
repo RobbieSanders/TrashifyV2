@@ -36,10 +36,16 @@ import {
   query,
   where,
   getDocs,
-  getDoc
+  getDoc,
+  orderBy
 } from 'firebase/firestore';
 import { db, storage } from '../utils/firebase';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import ReviewModal from '../components/ReviewModal';
+import { reviewService } from '../services/reviewService';
+import StarRatingTest from '../components/StarRatingTest';
+import SimpleStarRating from '../components/SimpleStarRating';
+import DirectNotificationService from '../services/directNotificationService';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -121,6 +127,12 @@ export default function HostProfileScreenModern({ navigation }: any) {
   const [aboutMe, setAboutMe] = useState((user as any)?.aboutMe || '');
   const [isSavingAboutMe, setIsSavingAboutMe] = useState(false);
   
+  // Review states
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewingCleaner, setReviewingCleaner] = useState<any>(null);
+  const [cleanerReviews, setCleanerReviews] = useState<{ [cleanerId: string]: any }>({});
+  const [completedJobsWithCleaners, setCompletedJobsWithCleaners] = useState<any[]>([]);
+  
   // Get stats
   const completedJobs = jobs.filter(j => j.hostId === user?.uid && j.status === 'completed').length;
   const activeJobs = jobs.filter(j => j.hostId === user?.uid && (j.status === 'open' || j.status === 'accepted' || j.status === 'in_progress')).length;
@@ -195,6 +207,75 @@ export default function HostProfileScreenModern({ navigation }: any) {
 
     return () => unsubscribe();
   }, [user?.uid]);
+
+  // Load completed jobs with cleaners and their reviews
+  useEffect(() => {
+    if (!db || !user?.uid) return;
+
+    const loadCompletedJobsAndReviews = async () => {
+      try {
+        // Get all completed jobs for this host
+        const cleaningJobsRef = collection(db, 'cleaningJobs');
+        const completedJobsQuery = query(
+          cleaningJobsRef,
+          where('hostId', '==', user.uid),
+          where('status', '==', 'completed')
+        );
+        
+        const completedJobsSnapshot = await getDocs(completedJobsQuery);
+        const cleanersMap = new Map();
+        
+        // Group jobs by cleaner
+        completedJobsSnapshot.forEach(doc => {
+          const job = doc.data();
+          const cleanerId = job.assignedCleanerId || job.cleanerId || job.assignedTeamMemberId;
+          const cleanerName = job.assignedCleanerName || job.cleanerName || 
+                            (job.cleanerFirstName ? `${job.cleanerFirstName} ${job.cleanerLastName || ''}`.trim() : null);
+          
+          if (cleanerId && cleanerName) {
+            if (!cleanersMap.has(cleanerId)) {
+              cleanersMap.set(cleanerId, {
+                cleanerId,
+                cleanerName,
+                completedJobs: 0,
+                lastJobDate: null
+              });
+            }
+            
+            const cleanerData = cleanersMap.get(cleanerId);
+            cleanerData.completedJobs++;
+            
+            const jobDate = job.completedAt || job.updatedAt;
+            if (!cleanerData.lastJobDate || jobDate > cleanerData.lastJobDate) {
+              cleanerData.lastJobDate = jobDate;
+            }
+          }
+        });
+        
+        // Convert map to array and sort by completed jobs
+        const cleanersArray = Array.from(cleanersMap.values()).sort((a, b) => b.completedJobs - a.completedJobs);
+        setCompletedJobsWithCleaners(cleanersArray);
+        
+        // Load reviews for each cleaner
+        const reviews: { [cleanerId: string]: any } = {};
+        for (const cleaner of cleanersArray) {
+          try {
+            const review = await reviewService.getReviewByHostAndCleaner(user.uid, cleaner.cleanerId);
+            if (review) {
+              reviews[cleaner.cleanerId] = review;
+            }
+          } catch (error) {
+            console.error(`Error loading review for cleaner ${cleaner.cleanerId}:`, error);
+          }
+        }
+        setCleanerReviews(reviews);
+      } catch (error) {
+        console.error('Error loading completed jobs and reviews:', error);
+      }
+    };
+
+    loadCompletedJobsAndReviews();
+  }, [user?.uid, jobs]); // Re-run when jobs change
 
   // Subscribe to emergency bids for this host's jobs
   useEffect(() => {
@@ -2158,6 +2239,7 @@ export default function HostProfileScreenModern({ navigation }: any) {
                 You have {activeJobs} active jobs and {completedJobs} completed jobs.
               </Text>
             </View>
+
           </Animated.View>
         ) : null}
         
@@ -2544,6 +2626,121 @@ export default function HostProfileScreenModern({ navigation }: any) {
                   </View>
                   <Text style={styles.emptyText}>No team members yet</Text>
                   <Text style={styles.emptySubtext}>Add your first team member to get started</Text>
+                </View>
+              )}
+
+              {/* Cleaners Who Have Completed Jobs Section */}
+              {completedJobsWithCleaners.length > 0 && (
+                <View style={{ marginTop: 24, paddingTop: 24, borderTopWidth: 1, borderTopColor: '#E5E7EB' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                    <Ionicons name="star" size={18} color="#FFD700" style={{ marginRight: 8 }} />
+                    <Text style={[styles.sectionTitle, { marginBottom: 0, fontSize: 16 }]}>
+                      Cleaners & Reviews
+                    </Text>
+                  </View>
+                  
+                  <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 16 }}>
+                    Leave reviews for cleaners who have completed jobs for you
+                  </Text>
+                  
+                  {completedJobsWithCleaners.map(cleaner => {
+                    const hasReview = !!cleanerReviews[cleaner.cleanerId];
+                    const review = cleanerReviews[cleaner.cleanerId];
+                    
+                    return (
+                      <TouchableOpacity
+                        key={cleaner.cleanerId}
+                        style={[styles.propertyCard, { marginBottom: 12 }]}
+                        onPress={() => {
+                          setReviewingCleaner(cleaner);
+                          setShowReviewModal(true);
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <View style={[styles.closeButton, { 
+                            backgroundColor: '#10B981', 
+                            marginRight: 12,
+                            width: 36,
+                            height: 36
+                          }]}>
+                            <Ionicons name="person" size={18} color="white" />
+                          </View>
+                          
+                          <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Text style={[styles.propertyLabel, { fontSize: 15 }]}>
+                                {cleaner.cleanerName}
+                              </Text>
+                              {hasReview ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                                  {[...Array(5)].map((_, i) => (
+                                    <Ionicons
+                                      key={i}
+                                      name={i < review.rating ? "star" : "star-outline"}
+                                      size={12}
+                                      color="#FFD700"
+                                    />
+                                  ))}
+                                </View>
+                              ) : (
+                                <View style={{
+                                  backgroundColor: '#FFD700',
+                                  paddingHorizontal: 8,
+                                  paddingVertical: 2,
+                                  borderRadius: 12,
+                                  marginLeft: 8
+                                }}>
+                                  <Text style={{ fontSize: 10, color: 'white', fontWeight: '600' }}>
+                                    LEAVE REVIEW
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            
+                            <Text style={[styles.propertyAddress, { fontSize: 12 }]}>
+                              {cleaner.completedJobs} completed job{cleaner.completedJobs !== 1 ? 's' : ''}
+                            </Text>
+                            
+                            {hasReview && review.comment && (
+                              <Text style={{ 
+                                fontSize: 11, 
+                                color: '#64748B', 
+                                marginTop: 4,
+                                fontStyle: 'italic'
+                              }} numberOfLines={2}>
+                                "{review.comment}"
+                              </Text>
+                            )}
+                          </View>
+                          
+                          <View style={{ alignItems: 'center' }}>
+                            {hasReview ? (
+                              <TouchableOpacity
+                                style={{
+                                  backgroundColor: '#EFF6FF',
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  borderRadius: 12,
+                                  borderWidth: 1,
+                                  borderColor: '#3B82F6'
+                                }}
+                                onPress={() => {
+                                  setReviewingCleaner(cleaner);
+                                  setShowReviewModal(true);
+                                }}
+                              >
+                                <Text style={{ fontSize: 11, color: '#3B82F6', fontWeight: '600' }}>
+                                  Edit Review
+                                </Text>
+                              </TouchableOpacity>
+                            ) : (
+                              <Ionicons name="chevron-forward" size={20} color="#CBD5E1" />
+                            )}
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               )}
               
@@ -3466,6 +3663,42 @@ export default function HostProfileScreenModern({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* Review Modal */}
+      {reviewingCleaner && (
+        <ReviewModal
+          visible={showReviewModal}
+          onClose={() => {
+            setShowReviewModal(false);
+            setReviewingCleaner(null);
+          }}
+          cleanerId={reviewingCleaner.cleanerId}
+          cleanerName={reviewingCleaner.cleanerName}
+          hostId={user?.uid || ''}
+          hostName={`${firstName} ${lastName}`.trim() || 'Host'}
+          existingReview={cleanerReviews[reviewingCleaner.cleanerId] || null}
+          onReviewSubmitted={() => {
+            // Reload reviews after submission
+            if (user?.uid) {
+              const loadReviews = async () => {
+                const reviews: { [cleanerId: string]: any } = {};
+                for (const cleaner of completedJobsWithCleaners) {
+                  try {
+                    const review = await reviewService.getReviewByHostAndCleaner(user.uid, cleaner.cleanerId);
+                    if (review) {
+                      reviews[cleaner.cleanerId] = review;
+                    }
+                  } catch (error) {
+                    console.error(`Error loading review for cleaner ${cleaner.cleanerId}:`, error);
+                  }
+                }
+                setCleanerReviews(reviews);
+              };
+              loadReviews();
+            }
+          }}
+        />
+      )}
     </View>
   );
 

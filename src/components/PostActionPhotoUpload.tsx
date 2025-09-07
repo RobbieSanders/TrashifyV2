@@ -245,24 +245,30 @@ export function PostActionPhotoUpload({ job, cleanerId, onComplete, onCancel }: 
         allPhotos.push(...req.photos);
       });
 
-      // Update the cleaning job with photos and concerns
-      const jobRef = doc(db, 'cleaningJobs', job.id);
-      const updateData: any = {
-        status: 'completed',
-        completedAt: Date.now()
-      };
+      // First, add photos and concerns to the job if they exist
+      if (allPhotos.length > 0 || concerns.trim()) {
+        const jobRef = doc(db, 'cleaningJobs', job.id);
+        const updateData: any = {};
 
-      // Only add photos if they exist
-      if (allPhotos.length > 0) {
-        updateData.cleaningPhotos = allPhotos;
+        // Only add photos if they exist
+        if (allPhotos.length > 0) {
+          updateData.cleaningPhotos = allPhotos;
+        }
+
+        // Only add concerns if they exist
+        if (concerns.trim()) {
+          updateData.cleaningConcerns = concerns.trim();
+        }
+
+        await updateDoc(jobRef, updateData);
+        console.log('[PostActionPhotoUpload] Added photos and concerns to job');
       }
 
-      // Only add concerns if they exist
-      if (concerns.trim()) {
-        updateData.cleaningConcerns = concerns.trim();
-      }
-
-      await updateDoc(jobRef, updateData);
+      // CRITICAL FIX: Use the service function to properly trigger notifications
+      console.log('[PostActionPhotoUpload] 🔔 Calling updateCleaningJobStatus to trigger notifications...');
+      const { updateCleaningJobStatus } = await import('../services/cleaningJobsService');
+      await updateCleaningJobStatus(job.id, 'completed');
+      console.log('[PostActionPhotoUpload] ✅ Job marked as completed via service function');
 
       // Send notification to host if concerns were noted
       if (concerns.trim() && job.hostId) {
@@ -279,6 +285,7 @@ export function PostActionPhotoUpload({ job, cleanerId, onComplete, onCancel }: 
         };
         
         addNotification(job.hostId, notificationMessage, 'cleaning_concern', navigationData);
+        console.log('[PostActionPhotoUpload] 📨 Sent concerns notification to host');
       }
 
       onComplete(allPhotos);

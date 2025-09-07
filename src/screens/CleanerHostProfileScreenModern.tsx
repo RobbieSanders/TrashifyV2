@@ -48,7 +48,9 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { geocodeAddressCrossPlatform } from '../services/geocodingService';
 import { geocodeAddressWithFallback } from '../services/googleGeocodingService';
 import { getCleanerBidHistory, withdrawBid, subscribeToFilteredRecruitments } from '../services/cleanerRecruitmentService';
-import { CleanerBid, CleanerRecruitment } from '../utils/types';
+import { CleanerBid, CleanerRecruitment, CleanerReview, CleanerReviewStats } from '../utils/types';
+import { reviewService } from '../services/reviewService';
+import ReviewModal from '../components/ReviewModal';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -116,6 +118,13 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
   // About me states
   const [aboutMe, setAboutMe] = useState((user as any)?.aboutMe || '');
   const [isSavingAboutMe, setIsSavingAboutMe] = useState(false);
+  
+  // Review states
+  const [reviews, setReviews] = useState<CleanerReview[]>([]);
+  const [reviewStats, setReviewStats] = useState<CleanerReviewStats | null>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [selectedReviewJob, setSelectedReviewJob] = useState<any>(null);
+  const [existingReview, setExistingReview] = useState<CleanerReview | null>(null);
   
   // Get cleaner-specific stats from assigned cleaning jobs
   const assignedJobs = allJobs.filter(job => 
@@ -208,6 +217,7 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       loadCleanerData();
       subscribeToAllJobs(user.uid);
       loadBidHistory();
+      loadReviews();
     }
     
     return () => {
@@ -239,6 +249,45 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       setLoadingBids(false);
     }
   };
+
+  // Load reviews for this cleaner
+  const loadReviews = async () => {
+    if (!user?.uid) return;
+    
+    try {
+      const cleanerReviews = await reviewService.getReviewsForCleaner(user.uid);
+      setReviews(cleanerReviews);
+      
+      const stats = await reviewService.getReviewStats(user.uid);
+      setReviewStats(stats);
+    } catch (error) {
+      console.error('Error loading reviews:', error);
+    }
+  };
+
+  // Subscribe to review updates
+  useEffect(() => {
+    if (!user?.uid) return;
+    
+    const unsubscribeReviews = reviewService.subscribeToCleanerReviews(
+      user.uid,
+      (updatedReviews) => {
+        setReviews(updatedReviews);
+      }
+    );
+    
+    const unsubscribeStats = reviewService.subscribeToReviewStats(
+      user.uid,
+      (updatedStats) => {
+        setReviewStats(updatedStats);
+      }
+    );
+    
+    return () => {
+      unsubscribeReviews();
+      unsubscribeStats();
+    };
+  }, [user?.uid]);
 
   // Load emergency bids for this cleaner
   useEffect(() => {
@@ -1893,10 +1942,24 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
             <Text style={styles.statNumber}>{completedJobs}</Text>
             <Text style={styles.statLabel}>Complete</Text>
           </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>${totalEarnings}</Text>
-            <Text style={styles.statLabel}>Earned</Text>
-          </View>
+          <TouchableOpacity 
+            style={styles.statCard}
+            onPress={() => setActiveTab('overview')}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {reviewStats && reviewStats.totalReviews > 0 ? (
+                <>
+                  <Ionicons name="star" size={16} color="#FFD700" style={{ marginRight: 4 }} />
+                  <Text style={styles.statNumber}>{reviewStats.averageRating.toFixed(1)}</Text>
+                </>
+              ) : (
+                <Text style={styles.statNumber}>--</Text>
+              )}
+            </View>
+            <Text style={styles.statLabel}>
+              {reviewStats?.totalReviews || 0} Review{reviewStats?.totalReviews !== 1 ? 's' : ''}
+            </Text>
+          </TouchableOpacity>
         </Animated.View>
       </Animated.View>
       
@@ -1968,6 +2031,160 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
       >
         {activeTab === 'overview' ? (
           <Animated.View style={{ opacity: fadeAnim }}>
+            {/* Reviews Section */}
+            <View style={styles.sectionCard}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <Text style={styles.sectionTitle}>My Reviews</Text>
+                {reviewStats && reviewStats.totalReviews > 0 && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="star" size={20} color="#FFD700" />
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: '#1a1a1a', marginLeft: 4 }}>
+                      {reviewStats.averageRating.toFixed(1)}
+                    </Text>
+                    <Text style={{ fontSize: 14, color: '#666', marginLeft: 4 }}>
+                      ({reviewStats.totalReviews})
+                    </Text>
+                  </View>
+                )}
+              </View>
+              
+              {reviews.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIcon}>
+                    <Ionicons name="star-outline" size={40} color="#999" />
+                  </View>
+                  <Text style={styles.emptyText}>No reviews yet</Text>
+                  <Text style={styles.emptySubtext}>Reviews from hosts will appear here</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Review Stats Summary */}
+                  {reviewStats && (
+                    <View style={{ 
+                      backgroundColor: '#f8f9fa', 
+                      borderRadius: 12, 
+                      padding: 16, 
+                      marginBottom: 16 
+                    }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                        {[5, 4, 3, 2, 1].map(rating => {
+                          const count = reviewStats[`${['one', 'two', 'three', 'four', 'five'][rating - 1]}StarCount` as keyof CleanerReviewStats] as number || 0;
+                          const percentage = reviewStats.totalReviews > 0 ? (count / reviewStats.totalReviews) * 100 : 0;
+                          
+                          return (
+                            <View key={rating} style={{ alignItems: 'center' }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                <Text style={{ fontSize: 12, color: '#666', marginRight: 2 }}>{rating}</Text>
+                                <Ionicons name="star" size={12} color="#FFD700" />
+                              </View>
+                              <View style={{ 
+                                width: 40, 
+                                height: 60, 
+                                backgroundColor: '#e0e0e0', 
+                                borderRadius: 4,
+                                overflow: 'hidden',
+                                transform: [{ rotate: '180deg' }]
+                              }}>
+                                <View style={{ 
+                                  width: '100%', 
+                                  height: `${percentage}%`, 
+                                  backgroundColor: '#10B981' 
+                                }} />
+                              </View>
+                              <Text style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                                {count}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
+                  
+                  {/* Review List */}
+                  {reviews.slice(0, 5).map((review) => (
+                    <View key={review.id} style={[styles.propertyCard, { marginBottom: 12 }]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <View>
+                          <Text style={{ fontSize: 14, fontWeight: '600', color: '#1a1a1a' }}>
+                            {review.hostName}
+                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                            {[1, 2, 3, 4, 5].map(star => (
+                              <Ionicons 
+                                key={star} 
+                                name={star <= review.rating ? "star" : "star-outline"} 
+                                size={14} 
+                                color="#FFD700" 
+                              />
+                            ))}
+                            <Text style={{ fontSize: 11, color: '#666', marginLeft: 8 }}>
+                              {new Date(review.createdAt).toLocaleDateString()}
+                            </Text>
+                          </View>
+                        </View>
+                        {review.canEdit && review.editCount < 10 && (
+                          <TouchableOpacity
+                            onPress={async () => {
+                              // Find the cleaning job for this review
+                              const job = allJobs.find(j => j.id === review.cleaningJobId);
+                              if (job) {
+                                setSelectedReviewJob(job);
+                                setExistingReview(review);
+                                setShowReviewModal(true);
+                              }
+                            }}
+                            style={{
+                              backgroundColor: '#E3F2FD',
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderRadius: 6,
+                            }}
+                          >
+                            <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
+                              Edit
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                      
+                      {review.comment && (
+                        <Text style={{ fontSize: 13, color: '#475569', lineHeight: 18 }}>
+                          {review.comment}
+                        </Text>
+                      )}
+                      
+                      {review.propertyAddress && (
+                        <Text style={{ fontSize: 11, color: '#64748B', marginTop: 8 }}>
+                          Property: {review.propertyAddress}
+                        </Text>
+                      )}
+                      
+                      {review.editCount > 0 && (
+                        <Text style={{ fontSize: 10, color: '#64748B', marginTop: 4, fontStyle: 'italic' }}>
+                          Edited {review.editCount} time{review.editCount !== 1 ? 's' : ''}
+                        </Text>
+                      )}
+                    </View>
+                  ))}
+                  
+                  {reviews.length > 5 && (
+                    <TouchableOpacity 
+                      style={{ alignItems: 'center', paddingVertical: 12 }}
+                      onPress={() => {
+                        // Navigate to full reviews screen or expand
+                        Alert.alert('Reviews', `You have ${reviews.length} total reviews`);
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, color: '#1E88E5', fontWeight: '600' }}>
+                        View All {reviews.length} Reviews
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+            </View>
+            
             <View style={styles.sectionCard}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <Text style={styles.sectionTitle}>Pending Bids</Text>
@@ -2630,51 +2847,56 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
               </View>
             ) : null}
 
-            {/* About Me Section */}
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>About Me</Text>
-              <Text style={[styles.emptySubtext, { marginBottom: 20, textAlign: 'left' }]}>
-                Tell potential clients about your cleaning experience, specialties, and what makes you unique
-              </Text>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>About Me</Text>
-                <TextInput
-                  style={[styles.input, { 
-                    height: 120, 
-                    textAlignVertical: 'top',
-                    paddingTop: 14
-                  }]}
-                  value={aboutMe}
-                  onChangeText={setAboutMe}
-                  placeholder="Tell clients about your cleaning experience, specialties, and what makes you stand out as a professional cleaner..."
-                  placeholderTextColor="#999"
-                  multiline={true}
-                  numberOfLines={6}
-                />
-                <Text style={{ 
-                  fontSize: 11, 
-                  color: '#666', 
-                  marginTop: 8,
-                  textAlign: 'right'
-                }}>
-                  {aboutMe.length}/500 characters
-                </Text>
-              </View>
-              
-              <TouchableOpacity 
-                style={styles.saveButton}
-                onPress={saveAboutMe}
-                disabled={isSavingAboutMe}
-              >
-                {isSavingAboutMe ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Save About Me</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-            ) : (
+            {settingsSubTab === 'personal' && (
+              <>
+                {/* About Me Section */}
+                <View style={styles.sectionCard}>
+                  <Text style={styles.sectionTitle}>About Me</Text>
+                  <Text style={[styles.emptySubtext, { marginBottom: 20, textAlign: 'left' }]}>
+                    Tell potential clients about your cleaning experience, specialties, and what makes you unique
+                  </Text>
+                  
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>About Me</Text>
+                    <TextInput
+                      style={[styles.input, { 
+                        height: 120, 
+                        textAlignVertical: 'top',
+                        paddingTop: 14
+                      }]}
+                      value={aboutMe}
+                      onChangeText={setAboutMe}
+                      placeholder="Tell clients about your cleaning experience, specialties, and what makes you stand out as a professional cleaner..."
+                      placeholderTextColor="#999"
+                      multiline={true}
+                      numberOfLines={6}
+                    />
+                    <Text style={{ 
+                      fontSize: 11, 
+                      color: '#666', 
+                      marginTop: 8,
+                      textAlign: 'right'
+                    }}>
+                      {aboutMe.length}/500 characters
+                    </Text>
+                  </View>
+                  
+                  <TouchableOpacity 
+                    style={styles.saveButton}
+                    onPress={saveAboutMe}
+                    disabled={isSavingAboutMe}
+                  >
+                    {isSavingAboutMe ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.saveButtonText}>Save About Me</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+            
+            {settingsSubTab === 'service' && (
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionTitle}>Service Location</Text>
                 <Text style={[styles.emptySubtext, { marginBottom: 20, textAlign: 'left' }]}>
@@ -3142,6 +3364,28 @@ export default function CleanerHostProfileScreenModern({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* Review Modal */}
+      {showReviewModal && selectedReviewJob && (
+        <ReviewModal
+          visible={showReviewModal}
+          onClose={() => {
+            setShowReviewModal(false);
+            setSelectedReviewJob(null);
+            setExistingReview(null);
+          }}
+          cleaningJobId={selectedReviewJob.id}
+          cleanerId={user?.uid || ''}
+          cleanerName={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Cleaner'}
+          hostId={selectedReviewJob.hostId || ''}
+          hostName={selectedReviewJob.hostName || 'Host'}
+          propertyAddress={selectedReviewJob.address}
+          existingReview={existingReview}
+          onReviewSubmitted={() => {
+            loadReviews();
+          }}
+        />
+      )}
     </View>
   );
 }

@@ -187,11 +187,23 @@ const ManualCleanForm: React.FC<ManualCleanFormProps> = ({
 
       // Add cleaner assignment if selected
       if (selectedCleaner) {
-        if (selectedCleaner.userId) {
-          jobData.assignedCleanerId = selectedCleaner.userId;
-        }
+        // Ensure we have a proper cleaner ID for notifications
+        const cleanerId = selectedCleaner.userId || selectedCleaner.id;
+        
+        // Set the primary fields that the notification system expects
+        jobData.assignedCleanerId = cleanerId;
         jobData.assignedCleanerName = selectedCleaner.name;
+        
+        // Also set the team member ID for reference
         jobData.assignedTeamMemberId = selectedCleaner.id;
+        
+        // Log for debugging
+        console.log(`[ManualCleanForm] Assigning cleaner:`, {
+          cleanerId,
+          cleanerName: selectedCleaner.name,
+          teamMemberId: selectedCleaner.id,
+          originalUserId: selectedCleaner.userId
+        });
       }
 
       await createCleaningJob(jobData);

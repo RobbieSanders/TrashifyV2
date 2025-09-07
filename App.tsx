@@ -12,6 +12,7 @@ import { useTrashifyStore } from './src/stores/trashifyStore';
 import { useAccountsStore } from './src/stores/accountsStore';
 import { useNotifications } from './src/stores/notificationsStore';
 import { useCleaningJobsStore } from './src/stores/cleaningJobsStore';
+import { subscribeToNotifications, unsubscribeFromNotifications, clearAllNotifications } from './src/services/notificationService';
 import { Job } from './src/utils/types';
 // Remove local auth import - using Firebase now
 import { 
@@ -146,6 +147,21 @@ export default function App() {
       if (unsubscribe) unsubscribe();
     };
   }, []);
+
+  // Subscribe to Firebase notifications when user logs in
+  useEffect(() => {
+    if (user?.uid) {
+      console.log('[App] Setting up notification subscription for user:', user.uid);
+      const unsubscribe = subscribeToNotifications(user.uid);
+      return () => {
+        console.log('[App] Cleaning up notification subscription');
+        unsubscribe();
+      };
+    } else {
+      // Clean up notifications when user logs out
+      unsubscribeFromNotifications();
+    }
+  }, [user?.uid]);
   
   // Debug logging
   useEffect(() => {
@@ -4219,7 +4235,7 @@ function TrackScreen({ route, navigation }: any) {
 // NOTIFICATIONS SCREEN
 function NotificationsScreen({ navigation }: any) {
   const user = useAuthStore(s => s.user);
-  const { items, markAllRead } = useNotifications();
+  const { items, markAllRead, clear } = useNotifications();
   const my = items.filter(i => i.userId === user?.uid);
   const [selectedJobForReport, setSelectedJobForReport] = useState<any>(null);
   const [showCleaningReportModal, setShowCleaningReportModal] = useState(false);
@@ -4227,6 +4243,44 @@ function NotificationsScreen({ navigation }: any) {
   useEffect(() => { 
     if (user?.uid) markAllRead(user.uid); 
   }, [user?.uid]);
+
+  const handleClearAllNotifications = async () => {
+    if (!user?.uid) return;
+    
+    const confirmAction = async () => {
+      try {
+        // Clear from Firebase first
+        await clearAllNotifications(user.uid);
+        // Local store will be updated automatically via Firebase subscription
+        console.log('[NotificationsScreen] Successfully cleared all notifications');
+      } catch (error) {
+        console.error('[NotificationsScreen] Error clearing notifications:', error);
+        // Fallback to local clear if Firebase fails
+        clear(user.uid);
+        Alert.alert('Notifications Cleared', 'Notifications have been cleared locally.');
+      }
+    };
+    
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to clear all notifications?');
+      if (confirmed) {
+        await confirmAction();
+      }
+    } else {
+      Alert.alert(
+        'Clear All Notifications',
+        'Are you sure you want to clear all notifications? This action cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Clear All', 
+            style: 'destructive',
+            onPress: confirmAction
+          }
+        ]
+      );
+    }
+  };
 
   const handleNotificationPress = async (notification: any) => {
     if (notification.type === 'cleaning_concern' && notification.navigationData) {
@@ -4247,6 +4301,22 @@ function NotificationsScreen({ navigation }: any) {
           Alert.alert('Error', 'Failed to load cleaning report.');
         }
       }
+    } else if (notification.type === 'review_request' && notification.navigationData) {
+      // Handle review request notifications - open review modal directly
+      const { params } = notification.navigationData;
+      if (params?.cleaningJobId && params?.cleanerId && params?.cleanerName) {
+        // Import and show the review modal directly
+        const ReviewModal = require('./src/components/ReviewModal').default;
+        
+        // For now, navigate to CleaningDetail with a flag to auto-open review modal
+        navigation.navigate('CleaningDetail', { 
+          cleaningJobId: params.cleaningJobId,
+          autoOpenReview: true,
+          reviewCleanerId: params.cleanerId,
+          reviewCleanerName: params.cleanerName,
+          reviewPropertyAddress: params.propertyAddress
+        });
+      }
     }
   };
 
@@ -4255,7 +4325,34 @@ function NotificationsScreen({ navigation }: any) {
       <ScrollView style={[styles.screen, { backgroundColor: '#F3F4F6' }]}
         contentContainerStyle={{ paddingBottom: 16 }}
       >
-        <Text style={[styles.title, { marginBottom: 8 }]}>Notifications</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Text style={[styles.title, { marginBottom: 0 }]}>Notifications</Text>
+          {my.length > 0 && (
+            <TouchableOpacity
+              onPress={handleClearAllNotifications}
+              style={{
+                backgroundColor: '#FEF2F2',
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: '#FECACA',
+                flexDirection: 'row',
+                alignItems: 'center',
+              }}
+            >
+              <Ionicons name="trash-outline" size={14} color="#EF4444" />
+              <Text style={{ 
+                color: '#EF4444', 
+                fontSize: 12, 
+                fontWeight: '600',
+                marginLeft: 4
+              }}>
+                Clear All
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
         {my.map(n => (
           <TouchableOpacity 
             key={n.id} 

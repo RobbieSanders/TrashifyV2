@@ -17,6 +17,9 @@ import { CleaningJob } from '../../utils/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotifications } from '../../stores/notificationsStore';
+import ReviewModal from '../../components/ReviewModal';
+import { reviewService } from '../../services/reviewService';
+import { CleaningReportViewer } from '../../components/CleaningReportViewer';
 
 type CleaningDetailRouteProp = RouteProp<{ params: { cleaningJobId: string } }, 'params'>;
 
@@ -43,15 +46,34 @@ const CleaningDetailScreen: React.FC = () => {
   const [upcomingCleanings, setUpcomingCleanings] = useState<CleaningJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'details' | 'bookings'>('details');
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [hasReviewed, setHasReviewed] = useState(false);
+  const [showCleaningReportModal, setShowCleaningReportModal] = useState(false);
+
+  // Check for auto-open review modal from notification navigation
+  useEffect(() => {
+    const params = route.params as any;
+    if (params?.autoOpenReview && params?.reviewCleanerId && params?.reviewCleanerName) {
+      // Auto-open review modal when navigated from notification
+      setShowReviewModal(true);
+    }
+  }, [route.params]);
 
   useEffect(() => {
     // Set up real-time listener for cleaning details
     const unsubscribe = onSnapshot(
       doc(db, 'cleaningJobs', cleaningJobId),
-      (doc) => {
+      async (doc) => {
         if (doc.exists()) {
           const cleaningData = { id: doc.id, ...doc.data() } as CleaningJob;
           setCleaning(cleaningData);
+          
+          // Check if host has reviewed this cleaner
+          const cleanerId = cleaningData.assignedCleanerId || cleaningData.cleanerId || (cleaningData as any).assignedTeamMemberId;
+          if (user?.role === 'host' && cleaningData.status === 'completed' && cleanerId) {
+            const existingReview = await reviewService.getReviewForJob(cleaningJobId, user.uid);
+            setHasReviewed(!!existingReview);
+          }
           
           // Use guest name from iCal SUMMARY field
           const guestName = cleaningData.guestName || 'Not available';
@@ -162,9 +184,19 @@ const CleaningDetailScreen: React.FC = () => {
 
   const handleUpdateStatus = async (newStatus: string) => {
     try {
-      const jobRef = doc(db, 'cleaningJobs', cleaningJobId);
-      await updateDoc(jobRef, { status: newStatus });
+      // Import the service function to properly trigger notifications
+      const { updateCleaningJobStatus } = await import('../../services/cleaningJobsService');
+      await updateCleaningJobStatus(cleaningJobId, newStatus as any);
       Alert.alert('Success', `Status updated to ${newStatus}`);
+      
+      // If marking as completed and user is a cleaner, show review reminder
+      if (newStatus === 'completed' && user?.role === 'cleaner' && cleaning) {
+        Alert.alert(
+          'Job Completed!', 
+          'Great work! The host will be notified to leave a review.',
+          [{ text: 'OK' }]
+        );
+      }
     } catch (error) {
       Alert.alert('Error', 'Failed to update status');
     }
@@ -444,29 +476,93 @@ const CleaningDetailScreen: React.FC = () => {
               </View>
             )}
 
-            {/* Quick Actions - Only visible to cleaners, not hosts */}
-            {user?.role === 'cleaner' && (
-              <View style={styles.actionsContainer}>
-                {cleaning.status === 'assigned' && (
-                  <TouchableOpacity 
-                    style={[styles.actionButton, styles.startButton]}
-                    onPress={() => handleUpdateStatus('in_progress')}
-                  >
-                    <Ionicons name="play" size={20} color="white" />
-                    <Text style={styles.actionButtonText}>Start Cleaning</Text>
-                  </TouchableOpacity>
-                )}
-                {cleaning.status === 'in_progress' && (
-                  <TouchableOpacity 
-                    style={[styles.actionButton, styles.completeButton]}
-                    onPress={() => handleUpdateStatus('completed')}
-                  >
-                    <Ionicons name="checkmark-circle" size={20} color="white" />
-                    <Text style={styles.actionButtonText}>Complete</Text>
-                  </TouchableOpacity>
-                )}
+            {/* Post-Cleaning Report Card - Show for completed jobs */}
+            {cleaning.status === 'completed' && (
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <Ionicons name="camera" size={20} color="#10B981" />
+                  <Text style={styles.cardTitle}>Post-Cleaning Report</Text>
+                </View>
+                <View style={styles.cardContent}>
+                  {cleaning.cleaningPhotos && cleaning.cleaningPhotos.length > 0 ? (
+                    <>
+                      <View style={styles.reportInfo}>
+                        <Text style={styles.reportText}>
+                          {cleaning.cleaningPhotos.length} photo{cleaning.cleaningPhotos.length > 1 ? 's' : ''} available
+                        </Text>
+                        {cleaning.cleaningConcerns && (
+                          <Text style={styles.concernsText}>
+                            ⚠️ Cleaner noted concerns
+                          </Text>
+                        )}
+                      </View>
+                      <TouchableOpacity 
+                        style={styles.viewReportButton}
+                        onPress={() => setShowCleaningReportModal(true)}
+                      >
+                        <Ionicons name="images" size={18} color="white" />
+                        <Text style={styles.viewReportButtonText}>View Report</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <View style={styles.noReportInfo}>
+                      <Ionicons name="information-circle" size={20} color="#64748B" />
+                      <Text style={styles.noReportText}>
+                        No post-cleaning report available for this job
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
             )}
+
+            {/* Quick Actions */}
+            <View style={styles.actionsContainer}>
+              {/* Cleaner actions */}
+              {user?.role === 'cleaner' && (
+                <>
+                  {cleaning.status === 'assigned' && (
+                    <TouchableOpacity 
+                      style={[styles.actionButton, styles.startButton]}
+                      onPress={() => handleUpdateStatus('in_progress')}
+                    >
+                      <Ionicons name="play" size={20} color="white" />
+                      <Text style={styles.actionButtonText}>Start Cleaning</Text>
+                    </TouchableOpacity>
+                  )}
+                  {cleaning.status === 'in_progress' && (
+                    <TouchableOpacity 
+                      style={[styles.actionButton, styles.completeButton]}
+                      onPress={() => handleUpdateStatus('completed')}
+                    >
+                      <Ionicons name="checkmark-circle" size={20} color="white" />
+                      <Text style={styles.actionButtonText}>Complete</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+              
+              {/* Host review action */}
+              {user?.role === 'host' && cleaning.status === 'completed' && 
+               (cleaning.assignedCleanerId || cleaning.cleanerId || (cleaning as any).assignedTeamMemberId) && 
+               !hasReviewed && (
+                <TouchableOpacity 
+                  style={[styles.actionButton, styles.reviewButton]}
+                  onPress={() => setShowReviewModal(true)}
+                >
+                  <Ionicons name="star" size={20} color="white" />
+                  <Text style={styles.actionButtonText}>Leave Review</Text>
+                </TouchableOpacity>
+              )}
+              
+              {/* Show if host has already reviewed */}
+              {user?.role === 'host' && cleaning.status === 'completed' && hasReviewed && (
+                <View style={styles.reviewedBadge}>
+                  <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                  <Text style={styles.reviewedText}>Review Submitted</Text>
+                </View>
+              )}
+            </View>
           </View>
         )}
 
@@ -551,6 +647,37 @@ const CleaningDetailScreen: React.FC = () => {
         )}
 
       </ScrollView>
+      
+      {/* Review Modal */}
+      {showReviewModal && cleaning && (
+        <ReviewModal
+          visible={showReviewModal}
+          onClose={() => {
+            setShowReviewModal(false);
+            setHasReviewed(true);
+          }}
+          cleaningJobId={cleaningJobId}
+          cleanerId={cleaning.assignedCleanerId || cleaning.cleanerId || (cleaning as any).assignedTeamMemberId || ''}
+          cleanerName={cleaning.assignedCleanerName || (cleaning as any).cleanerName || 
+                      (cleaning.cleanerFirstName ? `${cleaning.cleanerFirstName} ${cleaning.cleanerLastName || ''}`.trim() : 'Cleaner')}
+          hostId={user?.uid || ''}
+          hostName={`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Host'}
+          propertyAddress={cleaning.address}
+          onReviewSubmitted={() => {
+            setHasReviewed(true);
+            Alert.alert('Success', 'Thank you for your review!');
+          }}
+        />
+      )}
+
+      {/* Cleaning Report Modal */}
+      {showCleaningReportModal && cleaning && (
+        <CleaningReportViewer
+          job={cleaning}
+          visible={showCleaningReportModal}
+          onClose={() => setShowCleaningReportModal(false)}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -786,6 +913,26 @@ const styles = StyleSheet.create({
   completeButton: {
     backgroundColor: '#1E88E5'
   },
+  reviewButton: {
+    backgroundColor: '#FFD700'
+  },
+  reviewedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0FDF4',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#10B981'
+  },
+  reviewedText: {
+    color: '#10B981',
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 8
+  },
   actionButtonText: {
     color: 'white',
     fontWeight: '600',
@@ -931,6 +1078,48 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
     marginLeft: 8
+  },
+  reportInfo: {
+    marginBottom: 12
+  },
+  reportText: {
+    fontSize: 14,
+    color: '#10B981',
+    fontWeight: '600',
+    marginBottom: 4
+  },
+  concernsText: {
+    fontSize: 13,
+    color: '#F59E0B',
+    fontWeight: '600'
+  },
+  viewReportButton: {
+    backgroundColor: '#10B981',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  viewReportButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 8
+  },
+  noReportInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8
+  },
+  noReportText: {
+    fontSize: 14,
+    color: '#64748B',
+    marginLeft: 8,
+    flex: 1
   }
 });
 

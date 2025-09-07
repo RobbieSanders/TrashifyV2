@@ -25,7 +25,8 @@ import {
   limit,
   addDoc,
   getDoc,
-  onSnapshot
+  onSnapshot,
+  deleteDoc
 } from 'firebase/firestore';
 import { db } from '../../utils/firebase';
 import { UserProfile, ActivityLogEntry } from '../../services/userService';
@@ -602,7 +603,11 @@ export function AdminDashboard({ navigation }: any) {
         />
       )}
       {activeTab === 'tools' && (
-        <ScrollView style={styles.tabContent}>
+        <ScrollView 
+          style={styles.tabContent}
+          contentContainerStyle={styles.toolsScrollContent}
+          showsVerticalScrollIndicator={true}
+        >
           <Text style={styles.sectionTitle}>Admin Tools</Text>
           <PropertyCleanupTool />
           
@@ -611,6 +616,435 @@ export function AdminDashboard({ navigation }: any) {
           
           {/* SearchCleaners Debug Tool */}
           <SearchCleanersDebugTool />
+          
+          {/* Notification System Debug Tools */}
+          <View style={styles.toolSection}>
+            <Text style={styles.toolTitle}>🔔 Notification System Debug</Text>
+            
+            <TouchableOpacity 
+              style={styles.debugButton}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  const { default: DirectNotificationService } = await import('../../services/directNotificationService');
+                  const notificationId = await DirectNotificationService.createTestNotification(currentUser.uid);
+                  Alert.alert('Success', `Test notification created! ID: ${notificationId.substring(0, 8)}...`);
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to create test notification');
+                }
+              }}
+            >
+              <Ionicons name="notifications" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Create Test Notification</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#F59E0B' }]}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  const { default: DirectNotificationService } = await import('../../services/directNotificationService');
+                  const notificationId = await DirectNotificationService.createReviewNotification(
+                    currentUser.uid,
+                    'test-cleaner-123',
+                    'Test Cleaner',
+                    'test-job-456',
+                    '123 Test Street'
+                  );
+                  Alert.alert('Success', `Review notification created! ID: ${notificationId.substring(0, 8)}...`);
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to create review notification');
+                }
+              }}
+            >
+              <Ionicons name="star" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Create Review Notification</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#8B5CF6' }]}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  const { default: DirectNotificationService } = await import('../../services/directNotificationService');
+                  await DirectNotificationService.debugNotifications(currentUser.uid);
+                  Alert.alert('Debug Complete', 'Check console for notification debug info');
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to debug notifications');
+                }
+              }}
+            >
+              <Ionicons name="bug" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Debug My Notifications</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#DC2626' }]}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  const { updateCleaningJobStatus } = await import('../../services/cleaningJobsService');
+                  
+                  // Create a test job first
+                  const testJobRef = await addDoc(collection(db, 'cleaningJobs'), {
+                    hostId: currentUser.uid,
+                    assignedCleanerId: 'test-cleaner-123',
+                    assignedCleanerName: 'Test Cleaner',
+                    address: '123 Test Street, Test City, CA',
+                    status: 'assigned',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    preferredDate: Date.now()
+                  });
+                  
+                  // Mark it as completed to trigger notification
+                  await updateCleaningJobStatus(testJobRef.id, 'completed');
+                  
+                  // Clean up the test job
+                  await deleteDoc(doc(db, 'cleaningJobs', testJobRef.id));
+                  
+                  Alert.alert('Success', 'Test job completion flow executed! Check your notifications.');
+                } catch (error) {
+                  console.error('Test job completion error:', error);
+                  Alert.alert('Error', 'Failed to test job completion flow');
+                }
+              }}
+            >
+              <Ionicons name="checkmark-done" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Test Job Completion Flow</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#7C3AED' }]}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  // Check recent completed jobs
+                  const cleaningJobsRef = collection(db, 'cleaningJobs');
+                  const completedJobsQuery = query(
+                    cleaningJobsRef,
+                    where('hostId', '==', currentUser.uid),
+                    where('status', '==', 'completed'),
+                    orderBy('updatedAt', 'desc')
+                  );
+                  
+                  const completedJobsSnapshot = await getDocs(completedJobsQuery);
+                  console.log(`\n🔍 DEBUGGING COMPLETED JOBS FOR HOST: ${currentUser.uid}`);
+                  console.log(`📋 Found ${completedJobsSnapshot.size} completed jobs\n`);
+                  
+                  if (completedJobsSnapshot.empty) {
+                    Alert.alert('Debug Result', 'No completed jobs found for this host');
+                    return;
+                  }
+                  
+                  let debugInfo = `Found ${completedJobsSnapshot.size} completed jobs:\n\n`;
+                  
+                  for (const jobDoc of completedJobsSnapshot.docs) {
+                    const job = { id: jobDoc.id, ...jobDoc.data() } as any;
+                    const cleanerId = job.assignedCleanerId || job.cleanerId || job.assignedTeamMemberId;
+                    const cleanerName = job.assignedCleanerName || job.cleanerName || 
+                                      (job.cleanerFirstName ? `${job.cleanerFirstName} ${job.cleanerLastName || ''}`.trim() : null);
+                    
+                    debugInfo += `Job: ${job.address}\n`;
+                    debugInfo += `Cleaner: ${cleanerName || 'MISSING'} (${cleanerId || 'NO ID'})\n`;
+                    debugInfo += `Completed: ${job.completedAt ? new Date(job.completedAt).toLocaleString() : 'No time'}\n\n`;
+                    
+                    console.log(`📝 Job: ${job.id}`);
+                    console.log(`   Address: ${job.address}`);
+                    console.log(`   Cleaner ID: ${cleanerId || 'MISSING'}`);
+                    console.log(`   Cleaner Name: ${cleanerName || 'MISSING'}`);
+                    console.log(`   Completed: ${job.completedAt ? new Date(job.completedAt).toLocaleString() : 'No completion time'}`);
+                    console.log('');
+                  }
+                  
+                  // Check notifications
+                  const notificationsRef = collection(db, 'notifications');
+                  const notificationsQuery = query(
+                    notificationsRef,
+                    where('userId', '==', currentUser.uid),
+                    where('type', '==', 'review_request')
+                  );
+                  
+                  const notificationsSnapshot = await getDocs(notificationsQuery);
+                  console.log(`📬 Found ${notificationsSnapshot.size} review notifications for this host`);
+                  
+                  debugInfo += `\nReview Notifications: ${notificationsSnapshot.size}`;
+                  
+                  Alert.alert('Debug Complete', debugInfo);
+                } catch (error: any) {
+                  console.error('Debug error:', error);
+                  Alert.alert('Debug Error', error.message || 'Debug failed');
+                }
+              }}
+            >
+              <Ionicons name="search" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Debug Recent Completed Jobs</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#059669' }]}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  // Check all notifications for this user
+                  const notificationsRef = collection(db, 'notifications');
+                  const allNotificationsQuery = query(
+                    notificationsRef,
+                    where('userId', '==', currentUser.uid)
+                  );
+                  
+                  const allNotificationsSnapshot = await getDocs(allNotificationsQuery);
+                  console.log(`\n🔍 DEBUGGING ALL NOTIFICATIONS FOR USER: ${currentUser.uid}`);
+                  console.log(`📬 Found ${allNotificationsSnapshot.size} total notifications\n`);
+                  
+                  let debugInfo = `Total Notifications: ${allNotificationsSnapshot.size}\n\n`;
+                  
+                  if (allNotificationsSnapshot.size > 0) {
+                    allNotificationsSnapshot.docs.forEach((notifDoc, index) => {
+                      const notif = { id: notifDoc.id, ...notifDoc.data() } as any;
+                      console.log(`📨 Notification ${index + 1}:`);
+                      console.log(`   ID: ${notif.id}`);
+                      console.log(`   Type: ${notif.type}`);
+                      console.log(`   Message: ${notif.message}`);
+                      console.log(`   Created: ${new Date(notif.createdAt).toLocaleString()}`);
+                      console.log(`   Read: ${notif.read}`);
+                      console.log('');
+                      
+                      debugInfo += `${index + 1}. ${notif.type}: ${notif.message.substring(0, 50)}...\n`;
+                      debugInfo += `   Created: ${new Date(notif.createdAt).toLocaleString()}\n`;
+                      debugInfo += `   Read: ${notif.read}\n\n`;
+                    });
+                  } else {
+                    debugInfo += 'No notifications found in Firebase for this user.';
+                  }
+                  
+                  // Also check local notification store
+                  const { useNotifications } = await import('../../stores/notificationsStore');
+                  const localStore = useNotifications.getState();
+                  const localNotifications = localStore.items.filter(item => item.userId === currentUser.uid);
+                  
+                  console.log(`📱 Local notification store has ${localNotifications.length} notifications for this user`);
+                  debugInfo += `\nLocal Store Notifications: ${localNotifications.length}`;
+                  
+                  Alert.alert('All Notifications Debug', debugInfo);
+                } catch (error: any) {
+                  console.error('Debug error:', error);
+                  Alert.alert('Debug Error', error.message || 'Debug failed');
+                }
+              }}
+            >
+              <Ionicons name="list" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Debug All My Notifications</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#16A34A' }]}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  // Import and run the complete flow test
+                  const { testCompleteNotificationFlow } = await import('../../scripts/test/testCompleteNotificationFlow.js');
+                  const result = await testCompleteNotificationFlow();
+                  
+                  if (result && result.success) {
+                    Alert.alert(
+                      'Test Successful!', 
+                      `Notification created and synced successfully!\n\nNotification ID: ${result.notificationId?.substring(0, 8)}...\nLocal notifications: ${result.localNotifications}\nUnread count: ${result.unreadCount}\n\nCheck the notification icon in the top-right corner!`
+                    );
+                  } else {
+                    Alert.alert('Test Failed', result?.error || 'Unknown error occurred');
+                  }
+                } catch (error: any) {
+                  console.error('Complete flow test error:', error);
+                  Alert.alert('Test Error', error.message || 'Failed to run complete flow test');
+                }
+              }}
+            >
+              <Ionicons name="flash" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Test Complete Flow (Firebase → App)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#DC2626' }]}
+              onPress={async () => {
+                try {
+                  console.log('\n🔍 Starting comprehensive manual job notification flow debug...');
+                  
+                  // Import and run the debug flow
+                  const { debugManualJobNotificationFlow } = await import('../../scripts/debug/debugManualJobNotificationFlow.js');
+                  const result = await debugManualJobNotificationFlow();
+                  
+                  console.log('\n🏁 Debug flow completed:', result);
+                  
+                  if (result.success) {
+                    Alert.alert(
+                      'Debug Successful!', 
+                      `Manual job notification flow is working!\n\n✅ Job created and completed\n✅ ${result.notificationsCreated} notification(s) created\n📊 ${result.completedJobCount} completed jobs found\n📝 ${result.existingReviews} existing reviews\n\nCheck console for detailed logs.`
+                    );
+                  } else {
+                    Alert.alert(
+                      'Debug Failed!', 
+                      `Manual job notification flow has issues:\n\n❌ ${result.error || 'Unknown error'}\n\nThis explains why manual job completion isn't triggering notifications. Check console for detailed logs.`
+                    );
+                  }
+                } catch (error: any) {
+                  console.error('Manual job debug error:', error);
+                  Alert.alert('Debug Error', `Failed to run manual job debug: ${error.message || 'Unknown error'}`);
+                }
+              }}
+            >
+              <Ionicons name="construct" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Debug Manual Job Notification Flow</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#059669' }]}
+              onPress={async () => {
+                try {
+                  console.log('\n🔧 Starting manual job notification fix...');
+                  
+                  // Import and run the fix
+                  const { fixManualJobNotifications } = await import('../../scripts/fix/fixManualJobNotifications.js');
+                  const result = await fixManualJobNotifications();
+                  
+                  console.log('\n🏁 Fix completed:', result);
+                  
+                  if (result.success) {
+                    Alert.alert(
+                      'Fix Completed!', 
+                      `Manual job notification fix applied!\n\n✅ Total jobs checked: ${result.totalJobs}\n🔧 Jobs fixed: ${result.jobsFixed}\n⚠️ Jobs with issues: ${result.jobsWithIssues}\n\nThis should resolve notification issues for future job completions. Check console for detailed logs.`
+                    );
+                  } else {
+                    Alert.alert(
+                      'Fix Failed!', 
+                      `Manual job notification fix encountered issues:\n\n❌ ${result.error || 'Unknown error'}\n\nCheck console for detailed logs.`
+                    );
+                  }
+                } catch (error: any) {
+                  console.error('Manual job fix error:', error);
+                  Alert.alert('Fix Error', `Failed to run manual job fix: ${error.message || 'Unknown error'}`);
+                }
+              }}
+            >
+              <Ionicons name="hammer" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Fix Manual Job Notifications</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#7C2D12' }]}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  console.log('\n🔍 Testing real manual job creation flow...');
+                  
+                  // Get user's team members to test with
+                  const teamMembersRef = collection(db, 'users', currentUser.uid, 'teamMembers');
+                  const teamSnapshot = await getDocs(teamMembersRef);
+                  
+                  if (teamSnapshot.empty) {
+                    Alert.alert('No Team Members', 'You need to have team members to test manual job creation. Add cleaners to your team first.');
+                    return;
+                  }
+                  
+                  // Get the first active cleaner
+                  let testCleaner: any = null;
+                  teamSnapshot.forEach(doc => {
+                    const member = { id: doc.id, ...doc.data() } as any;
+                    if (member.status === 'active' && 
+                        (member.role === 'primary_cleaner' || member.role === 'secondary_cleaner') && 
+                        !testCleaner) {
+                      testCleaner = member;
+                    }
+                  });
+                  
+                  if (!testCleaner) {
+                    Alert.alert('No Active Cleaners', 'You need to have active cleaners in your team to test manual job creation.');
+                    return;
+                  }
+                  
+                  console.log('🧹 Found test cleaner:', testCleaner);
+                  
+                  // Create a test manual job using the same logic as ManualCleanForm
+                  const { createCleaningJob } = await import('../../services/cleaningJobsService');
+                  
+                  const cleanerId = testCleaner.userId || testCleaner.id;
+                  
+                  const jobData = {
+                    address: '123 Test Manual Job Street, Test City, CA',
+                    destination: { latitude: 25.7617, longitude: -80.1918 },
+                    hostId: currentUser.uid,
+                    cleaningType: 'standard' as const,
+                    preferredDate: Date.now() + (24 * 60 * 60 * 1000), // Tomorrow
+                    preferredTime: '10:00 AM',
+                    status: 'assigned' as const,
+                    assignedCleanerId: cleanerId,
+                    assignedCleanerName: testCleaner.name,
+                    assignedTeamMemberId: testCleaner.id,
+                    notes: 'Test manual job for notification debugging'
+                  };
+                  
+                  console.log('📋 Creating manual job with data:', jobData);
+                  
+                  const jobId = await createCleaningJob(jobData);
+                  console.log(`✅ Manual job created with ID: ${jobId}`);
+                  
+                  // Now mark it as completed to test notification
+                  const { updateCleaningJobStatus } = await import('../../services/cleaningJobsService');
+                  console.log('🔄 Marking job as completed...');
+                  await updateCleaningJobStatus(jobId, 'completed');
+                  
+                  // Clean up the test job
+                  await deleteDoc(doc(db, 'cleaningJobs', jobId));
+                  console.log('🧹 Test job cleaned up');
+                  
+                  Alert.alert(
+                    'Manual Job Test Complete!', 
+                    `Test completed successfully!\n\n✅ Manual job created and assigned to ${testCleaner.name}\n✅ Job marked as completed\n✅ Test job cleaned up\n\nCheck your notifications and console logs for results.`
+                  );
+                } catch (error: any) {
+                  console.error('Manual job test error:', error);
+                  Alert.alert('Test Error', `Failed to test manual job creation: ${error.message || 'Unknown error'}`);
+                }
+              }}
+            >
+              <Ionicons name="play-circle" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Test Real Manual Job Flow</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.debugButton, { backgroundColor: '#B91C1C' }]}
+              onPress={async () => {
+                if (!currentUser?.uid) return;
+                try {
+                  console.log('\n🔍 Tracing your real job completion...');
+                  
+                  // Import and run the trace
+                  const { traceRealJobCompletion } = await import('../../scripts/debug/traceRealJobCompletion.js');
+                  const result = await traceRealJobCompletion(currentUser.uid);
+                  
+                  console.log('\n🏁 Trace completed:', result);
+                  
+                  if (result.success) {
+                    Alert.alert(
+                      'Trace Complete - No Issues Found!', 
+                      `Your most recent job completion looks correct:\n\n✅ Job: ${result.jobAddress}\n✅ Cleaner: ${result.cleanerName}\n📊 Completion #${result.completedCleanCount}\n📝 Has reviewed: ${result.hasReviewed}\n🔔 Should notify: ${result.shouldSendNotification}\n📬 Related notifications: ${result.relatedNotifications}\n\nCheck console for detailed analysis.`
+                    );
+                  } else {
+                    Alert.alert(
+                      'Issue Found!', 
+                      `Problem identified with your job completion:\n\n❌ ${result.issueFound || result.error}\n\n${result.jobAddress ? `Job: ${result.jobAddress}` : 'No recent job found'}\n\nThis explains why notifications aren't appearing. Check console for detailed analysis.`
+                    );
+                  }
+                } catch (error: any) {
+                  console.error('Trace error:', error);
+                  Alert.alert('Trace Error', `Failed to trace job completion: ${error.message || 'Unknown error'}`);
+                }
+              }}
+            >
+              <Ionicons name="analytics" size={20} color="#fff" />
+              <Text style={styles.debugButtonText}>Trace Real Job Completion</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       )}
 
@@ -969,5 +1403,38 @@ const styles = StyleSheet.create({
   actionButtonText: {
     color: 'white',
     fontWeight: '600',
+  },
+  toolSection: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  toolTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 12,
+  },
+  debugButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1E88E5',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  debugButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  toolsScrollContent: {
+    paddingBottom: 100, // Add extra padding at bottom to prevent overlap with navigation
   },
 });
