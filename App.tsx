@@ -314,9 +314,9 @@ function AdminTabs() {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#F1F5F9',
-          height: Platform.OS === 'ios' ? 85 : 70,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
-          paddingTop: 12,
+          height: Platform.OS === 'ios' ? 70 : 60,
+          paddingBottom: Platform.OS === 'ios' ? 15 : 8,
+          paddingTop: 8,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.1,
@@ -324,7 +324,7 @@ function AdminTabs() {
           elevation: 8,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: '600',
           letterSpacing: 0.2,
         },
@@ -342,12 +342,12 @@ function AdminTabs() {
             <View style={{
               alignItems: 'center',
               justifyContent: 'center',
-              width: 32,
-              height: 32,
-              borderRadius: 8,
+              width: 28,
+              height: 28,
+              borderRadius: 6,
               backgroundColor: focused ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
             }}>
-              <Ionicons name={icon as any} size={size} color={color} />
+              <Ionicons name={icon as any} size={size - 2} color={color} />
             </View>
           );
         },
@@ -407,9 +407,9 @@ function HostTabs() {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#F1F5F9',
-          height: Platform.OS === 'ios' ? 85 : 70,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
-          paddingTop: 12,
+          height: Platform.OS === 'ios' ? 70 : 60,
+          paddingBottom: Platform.OS === 'ios' ? 15 : 8,
+          paddingTop: 8,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.1,
@@ -417,7 +417,7 @@ function HostTabs() {
           elevation: 8,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: '600',
           letterSpacing: 0.2,
         },
@@ -434,12 +434,12 @@ function HostTabs() {
             <View style={{
               alignItems: 'center',
               justifyContent: 'center',
-              width: 32,
-              height: 32,
-              borderRadius: 8,
+              width: 28,
+              height: 28,
+              borderRadius: 6,
               backgroundColor: focused ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
             }}>
-              <Ionicons name={icon as any} size={size} color={color} />
+              <Ionicons name={icon as any} size={size - 2} color={color} />
             </View>
           );
         },
@@ -2091,9 +2091,9 @@ function HostHomeScreen({ navigation }: any) {
             </View>
           )}
 
-          {/* Services Section - Now sticky */}
+          {/* Services Section - Compact but readable design */}
           <View style={{ marginBottom: 0 }}>
-            <Text style={[styles.title, { fontSize: 18, marginBottom: 10 }]}>Services</Text>
+            <Text style={[styles.title, { fontSize: 17, marginBottom: 10 }]}>I want to...</Text>
             
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 }}>
               {/* Schedule New Pickup */}
@@ -2103,18 +2103,19 @@ function HostHomeScreen({ navigation }: any) {
                   margin: '1%',
                   backgroundColor: '#1E88E5',
                   borderRadius: 10,
-                  padding: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 6,
                   alignItems: 'center',
                   shadowColor: '#1E88E5',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 4,
-                  elevation: 3,
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 3,
+                  elevation: 2,
                 }}
                 onPress={() => setShowPickupModal(true)}
               >
                 <Ionicons name="trash-outline" size={18} color="white" style={{ marginBottom: 3 }} />
-                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>Schedule Pickup</Text>
+                <Text style={{ color: 'white', fontSize: 10, fontWeight: '600', textAlign: 'center' }}>Schedule Pickup</Text>
               </TouchableOpacity>
 
               {/* Recruit Cleaners */}
@@ -2124,18 +2125,19 @@ function HostHomeScreen({ navigation }: any) {
                   margin: '1%',
                   backgroundColor: '#10B981',
                   borderRadius: 10,
-                  padding: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 6,
                   alignItems: 'center',
                   shadowColor: '#10B981',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 4,
-                  elevation: 3,
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 3,
+                  elevation: 2,
                 }}
                 onPress={() => navigation.navigate('SearchCleaners')}
               >
                 <Ionicons name="people-outline" size={18} color="white" style={{ marginBottom: 3 }} />
-                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>Recruit Cleaners</Text>
+                <Text style={{ color: 'white', fontSize: 10, fontWeight: '600', textAlign: 'center' }}>Find Cleaners</Text>
               </TouchableOpacity>
 
               {/* Schedule Emergency Clean */}
@@ -2145,18 +2147,19 @@ function HostHomeScreen({ navigation }: any) {
                   margin: '1%',
                   backgroundColor: '#EF4444',
                   borderRadius: 10,
-                  padding: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 6,
                   alignItems: 'center',
                   shadowColor: '#EF4444',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 4,
-                  elevation: 3,
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 3,
+                  elevation: 2,
                 }}
                 onPress={() => setShowEmergencyModal(true)}
               >
                 <Ionicons name="warning-outline" size={18} color="white" style={{ marginBottom: 3 }} />
-                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>Emergency Clean</Text>
+                <Text style={{ color: 'white', fontSize: 10, fontWeight: '600', textAlign: 'center' }}>Emergency Clean</Text>
               </TouchableOpacity>
 
               {/* Schedule Handyman Services */}
@@ -2166,20 +2169,21 @@ function HostHomeScreen({ navigation }: any) {
                   margin: '1%',
                   backgroundColor: '#8B5CF6',
                   borderRadius: 10,
-                  padding: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 6,
                   alignItems: 'center',
                   shadowColor: '#8B5CF6',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 4,
-                  elevation: 3,
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.12,
+                  shadowRadius: 3,
+                  elevation: 2,
                 }}
                 onPress={() => {
                   Alert.alert('Coming Soon', 'Handyman services will be available soon!');
                 }}
               >
                 <Ionicons name="hammer-outline" size={18} color="white" style={{ marginBottom: 3 }} />
-                <Text style={{ color: 'white', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>Handyman</Text>
+                <Text style={{ color: 'white', fontSize: 10, fontWeight: '600', textAlign: 'center' }}>Handyman</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2788,9 +2792,9 @@ function WorkerTabs() {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#F1F5F9',
-          height: Platform.OS === 'ios' ? 85 : 70,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
-          paddingTop: 12,
+          height: Platform.OS === 'ios' ? 70 : 60,
+          paddingBottom: Platform.OS === 'ios' ? 15 : 8,
+          paddingTop: 8,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.1,
@@ -2798,7 +2802,7 @@ function WorkerTabs() {
           elevation: 8,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: '600',
           letterSpacing: 0.2,
         },
@@ -2812,12 +2816,12 @@ function WorkerTabs() {
             <View style={{
               alignItems: 'center',
               justifyContent: 'center',
-              width: 32,
-              height: 32,
-              borderRadius: 8,
+              width: 28,
+              height: 28,
+              borderRadius: 6,
               backgroundColor: focused ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
             }}>
-              <Ionicons name={icon as any} size={size} color={color} />
+              <Ionicons name={icon as any} size={size - 2} color={color} />
             </View>
           );
         },
@@ -2846,9 +2850,9 @@ function CleanerTabs() {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#F1F5F9',
-          height: Platform.OS === 'ios' ? 85 : 70,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 10,
-          paddingTop: 12,
+          height: Platform.OS === 'ios' ? 70 : 60,
+          paddingBottom: Platform.OS === 'ios' ? 15 : 8,
+          paddingTop: 8,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.1,
@@ -2856,7 +2860,7 @@ function CleanerTabs() {
           elevation: 8,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: '600',
           letterSpacing: 0.2,
         },
@@ -2870,12 +2874,12 @@ function CleanerTabs() {
             <View style={{
               alignItems: 'center',
               justifyContent: 'center',
-              width: 32,
-              height: 32,
-              borderRadius: 8,
+              width: 28,
+              height: 28,
+              borderRadius: 6,
               backgroundColor: focused ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
             }}>
-              <Ionicons name={icon as any} size={size} color={color} />
+              <Ionicons name={icon as any} size={size - 2} color={color} />
             </View>
           );
         },
