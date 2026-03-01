@@ -333,7 +333,7 @@ function AdminTabs() {
           if (route.name === 'Home') icon = focused ? 'home' : 'home-outline';
           else if (route.name === 'Cleaning') icon = focused ? 'calendar' : 'calendar-outline';
           else if (route.name === 'Handyman') icon = focused ? 'hammer' : 'hammer-outline';
-          else if (route.name === 'Trash Services') icon = focused ? 'trash' : 'trash-outline';
+          else if (route.name === 'Trash') icon = focused ? 'trash' : 'trash-outline';
           else if (route.name === 'My Teams') icon = focused ? 'people' : 'people-outline';
           else if (route.name === 'Properties') icon = focused ? 'business' : 'business-outline';
           else if (route.name === 'More') icon = focused ? 'ellipsis-horizontal' : 'ellipsis-horizontal-outline';
@@ -356,7 +356,7 @@ function AdminTabs() {
       <Tab.Screen name="Home" component={HostStack} />
       <Tab.Screen name="Cleaning" component={CleaningStack} />
       <Tab.Screen name="Handyman" component={HandymanServicesStack} />
-      <Tab.Screen name="Trash Services" component={TrashServicesStack} />
+      <Tab.Screen name="Trash" component={TrashServicesStack} />
       <Tab.Screen name="More" component={MoreStack} />
     </Tab.Navigator>
   );
@@ -425,8 +425,8 @@ function HostTabs() {
           let icon = 'help';
           if (route.name === 'Home') icon = focused ? 'home' : 'home-outline';
           else if (route.name === 'Cleaning') icon = focused ? 'calendar' : 'calendar-outline';
-          else if (route.name === 'Handyman Services') icon = focused ? 'hammer' : 'hammer-outline';
-          else if (route.name === 'Trash Services') icon = focused ? 'trash' : 'trash-outline';
+          else if (route.name === 'Handyman') icon = focused ? 'hammer' : 'hammer-outline';
+          else if (route.name === 'Trash') icon = focused ? 'trash' : 'trash-outline';
           else if (route.name === 'My Teams') icon = focused ? 'people' : 'people-outline';
           else if (route.name === 'More') icon = focused ? 'ellipsis-horizontal' : 'ellipsis-horizontal-outline';
           
@@ -447,8 +447,8 @@ function HostTabs() {
     >
       <Tab.Screen name="Home" component={HostOnlyStack} />
       <Tab.Screen name="Cleaning" component={CleaningStack} />
-      <Tab.Screen name="Handyman Services" component={HandymanServicesStack} />
-      <Tab.Screen name="Trash Services" component={TrashServicesStack} />
+      <Tab.Screen name="Handyman" component={HandymanServicesStack} />
+      <Tab.Screen name="Trash" component={TrashServicesStack} />
       <Tab.Screen name="More" component={MoreStack} />
     </Tab.Navigator>
   );

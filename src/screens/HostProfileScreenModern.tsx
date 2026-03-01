@@ -1385,14 +1385,15 @@ export default function HostProfileScreenModern({ navigation }: any) {
     },
     tabContainer: {
       flexDirection: 'row',
-      paddingHorizontal: 20,
-      marginBottom: 20,
-      gap: 10,
+      paddingHorizontal: 12,
+      marginBottom: 16,
+      gap: 6,
     },
     tab: {
       flex: 1,
-      paddingVertical: 12,
-      borderRadius: 12,
+      paddingVertical: 8,
+      paddingHorizontal: 2,
+      borderRadius: 10,
       backgroundColor: '#fff',
       alignItems: 'center',
       shadowColor: '#000',
@@ -1406,9 +1407,10 @@ export default function HostProfileScreenModern({ navigation }: any) {
       shadowOpacity: 0.15,
     },
     tabText: {
-      fontSize: 14,
+      fontSize: 10,
       fontWeight: '600',
       color: '#666',
+      textAlign: 'center',
     },
     activeTabText: {
       color: '#fff',
@@ -3013,14 +3015,20 @@ export default function HostProfileScreenModern({ navigation }: any) {
                         color={memberRole === role ? 'white' : '#64748B'} 
                         style={{ marginBottom: 4 }}
                       />
-                      <Text style={[
-                        styles.actionButtonText,
-                        { 
-                          fontSize: 11,
-                          color: memberRole === role ? 'white' : '#64748B',
-                          textAlign: 'center'
-                        }
-                      ]}>
+                      <Text 
+                        style={[
+                          styles.actionButtonText,
+                          { 
+                            fontSize: 10,
+                            color: memberRole === role ? 'white' : '#64748B',
+                            textAlign: 'center',
+                            flexWrap: 'wrap',
+                          }
+                        ]}
+                        numberOfLines={2}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.8}
+                      >
                         {getRoleLabel(role)}
                       </Text>
                     </TouchableOpacity>
