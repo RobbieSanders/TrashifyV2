@@ -95,12 +95,47 @@ export async function createUserProfile(
     };
 
     await setDoc(userRef, userData);
-    console.log('[userService] Created new user profile:', user.uid);
+    console.log('[userService] Created new user profile:', user.uid, 'with role:', userData.role);
     return userData;
   } else {
-    // User exists, return existing data
+    // User exists - check if we need to update the role
+    // This handles the race condition where auth listener creates profile with default 'host'
+    // before the signup function can set the correct role
     const existingData = snapshot.data() as UserProfile;
-    console.log('[userService] Found existing user profile:', user.uid);
+    console.log('[userService] Found existing user profile:', user.uid, 'with role:', existingData.role);
+    
+    // If a specific role is provided (not host default) and it differs from existing,
+    // and the profile was just created (within last 30 seconds), update the role
+    // This ensures signup with cleaner/worker role gets properly applied
+    if (additionalData?.role && 
+        additionalData.role !== 'host' && 
+        existingData.role !== additionalData.role) {
+      
+      const createdAt = existingData.createdAt?.toDate?.() || existingData.createdAt;
+      const now = new Date();
+      const profileAgeMs = createdAt ? now.getTime() - new Date(createdAt).getTime() : Infinity;
+      
+      // Only update if profile was created within last 30 seconds (race condition scenario)
+      if (profileAgeMs < 30000) {
+        console.log('[userService] Updating role from', existingData.role, 'to', additionalData.role, '(profile age:', Math.round(profileAgeMs/1000), 'seconds)');
+        
+        const updates = {
+          role: additionalData.role,
+          firstName: additionalData.firstName || existingData.firstName,
+          lastName: additionalData.lastName || existingData.lastName,
+          updatedAt: serverTimestamp()
+        };
+        
+        await updateDoc(userRef, updates);
+        
+        return {
+          ...existingData,
+          ...updates,
+          role: additionalData.role
+        } as UserProfile;
+      }
+    }
+    
     return existingData;
   }
 }

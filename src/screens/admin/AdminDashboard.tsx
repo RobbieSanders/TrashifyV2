@@ -374,9 +374,9 @@ export function AdminDashboard({ navigation }: any) {
         
         <View style={styles.statCard}>
           <View style={styles.statCardInner}>
-            <Ionicons name="briefcase" size={24} color="#F59E0B" />
+            <Ionicons name="trash" size={24} color="#F59E0B" />
             <Text style={styles.statNumber}>{stats.totalWorkers}</Text>
-            <Text style={styles.statLabel}>Workers</Text>
+            <Text style={styles.statLabel}>Trash Services</Text>
           </View>
         </View>
         

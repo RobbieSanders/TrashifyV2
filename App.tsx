@@ -642,6 +642,7 @@ function HostHomeScreen({ navigation }: any) {
   const [showCalendarView, setShowCalendarView] = useState(false);
   const [showAllServicesModal, setShowAllServicesModal] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [emergencyBidsCount, setEmergencyBidsCount] = useState(0);
   const jobs = useTrashifyStore(s => s.jobs);
   const createJobLocal = useTrashifyStore(s => s.createJob);
   const setJobs = useTrashifyStore(s => s.setJobs);
@@ -703,6 +704,45 @@ function HostHomeScreen({ navigation }: any) {
       subscribeToAllJobs(user.uid);
     }
   }, [user?.uid, subscribeToAllJobs]);
+
+  // Subscribe to emergency bids count for main screen
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const emergencyBidsRef = collection(db, 'emergencyBids');
+    const emergencyBidsQuery = query(
+      emergencyBidsRef,
+      where('status', '==', 'pending')
+    );
+    
+    const unsubscribe = onSnapshot(emergencyBidsQuery, async (snapshot) => {
+      let count = 0;
+      
+      for (const bidDoc of snapshot.docs) {
+        const bidData = bidDoc.data();
+        if (bidData.cleaningJobId) {
+          try {
+            const jobDoc = await getDoc(doc(db, 'cleaningJobs', bidData.cleaningJobId));
+            if (jobDoc.exists()) {
+              const jobData = jobDoc.data();
+              if (jobData.hostId === user.uid && jobData.isEmergency) {
+                count++;
+              }
+            }
+          } catch (error) {
+            console.error('Error checking bid job:', error);
+          }
+        }
+      }
+      
+      setEmergencyBidsCount(count);
+    }, (error) => {
+      console.error('[HostHomeScreen] Error loading emergency bids count:', error);
+      setEmergencyBidsCount(0);
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   useEffect(() => {
     if (user?.uid) loadProperties(user.uid);
@@ -1769,46 +1809,68 @@ function HostHomeScreen({ navigation }: any) {
                 };
 
                 return emergencyBids.length > 0 && (
-                  <View style={{ marginBottom: Platform.OS === 'web' ? 20 : 16 }}>
-                    <View style={{ 
-                      flexDirection: 'row', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center', 
-                      marginBottom: Platform.OS === 'web' ? 12 : 8,
+                  <View style={{ marginBottom: Platform.OS === 'web' ? 24 : 20 }}>
+                    {/* Header */}
+                    <View style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: 16,
                       backgroundColor: '#FEF2F2',
-                      padding: 12,
-                      borderRadius: 8,
+                      padding: 16,
+                      borderRadius: 12,
                       borderWidth: 2,
-                      borderColor: '#FEE2E2'
+                      borderColor: '#FEE2E2',
+                      position: 'relative'
                     }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="warning" size={20} color="#DC2626" style={{ marginRight: 8 }} />
-                        <Text style={[styles.subtitle, { 
-                          fontSize: Platform.OS === 'web' ? 16 : 15, 
-                          fontWeight: '700', 
-                          marginBottom: 0,
-                          color: '#DC2626'
-                        }]}>
-                          🚨 Emergency Cleaning Bids ({emergencyBids.length})
-                        </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 40 }}>
+                        <Ionicons name="warning" size={24} color="#DC2626" style={{ marginRight: 12 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{
+                            fontSize: Platform.OS === 'web' ? 16 : 15,
+                            fontWeight: '700',
+                            color: '#DC2626',
+                            marginBottom: 2
+                          }}>
+                            Emergency Cleaning Bids
+                          </Text>
+                          <Text style={{
+                            fontSize: 12,
+                            color: '#991B1B',
+                            fontWeight: '600'
+                          }}>
+                            {emergencyBids.length} urgent {emergencyBids.length === 1 ? 'bid' : 'bids'} awaiting response
+                          </Text>
+                        </View>
                       </View>
                       <View style={{
+                        position: 'absolute',
+                        top: 8,
+                        right: 8,
                         backgroundColor: '#DC2626',
                         paddingHorizontal: 8,
                         paddingVertical: 4,
-                        borderRadius: 8,
+                        borderRadius: 12,
+                        minWidth: 28,
+                        alignItems: 'center',
+                        shadowColor: '#DC2626',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.3,
+                        shadowRadius: 3,
+                        elevation: 2
                       }}>
-                        <Text style={{ color: 'white', fontSize: 10, fontWeight: '700' }}>
-                          {emergencyBids.length} URGENT
+                        <Text style={{ color: 'white', fontSize: 9, fontWeight: '800' }}>
+                          {emergencyBids.length}
                         </Text>
                       </View>
                     </View>
-                    
+
+                    {/* Bid Cards */}
                     {emergencyBids.map((bid) => {
                       const job = bid.jobDetails;
-                      const urgencyColor = job?.urgencyLevel === 'immediate' ? '#DC2626' : 
+                      const urgencyColor = job?.urgencyLevel === 'immediate' ? '#DC2626' :
                                          job?.urgencyLevel === 'same-day' ? '#EA580C' : '#D97706';
-                      
+
                       // Extract city from address for display
                       const getLocationDisplay = (address: string) => {
                         if (!address) return 'Location not specified';
@@ -1818,110 +1880,151 @@ function HostHomeScreen({ navigation }: any) {
                         }
                         return 'General area';
                       };
-                      
+
                       return (
-                        <View key={bid.id} style={[styles.card, { 
-                          marginBottom: Platform.OS === 'web' ? 12 : 8,
-                          borderLeftWidth: 4,
-                          borderLeftColor: urgencyColor,
-                          backgroundColor: '#FEF2F2',
-                          padding: Platform.OS === 'web' ? 12 : 10
-                        }]}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View key={bid.id} style={{
+                          backgroundColor: 'white',
+                          borderRadius: 12,
+                          padding: 16,
+                          marginBottom: 12,
+                          borderWidth: 2,
+                          borderColor: '#FEE2E2',
+                          shadowColor: urgencyColor,
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowOpacity: 0.1,
+                          shadowRadius: 4,
+                          elevation: 2
+                        }}>
+                          {/* Header Row - Priority Badge & Price */}
+                          <View style={{ 
+                            flexDirection: 'row', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center', 
+                            marginBottom: 12 
+                          }}>
                             <View style={{
-                              backgroundColor: urgencyColor,
-                              borderRadius: Platform.OS === 'web' ? 12 : 10,
-                              padding: Platform.OS === 'web' ? 6 : 5,
-                              marginRight: Platform.OS === 'web' ? 8 : 8
+                              backgroundColor: `${urgencyColor}15`,
+                              paddingHorizontal: 10,
+                              paddingVertical: 6,
+                              borderRadius: 6,
+                              borderWidth: 1,
+                              borderColor: urgencyColor
                             }}>
-                              <Ionicons name="flash" size={Platform.OS === 'web' ? 16 : 14} color="white" />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-                                <Text style={[styles.subtitle, { 
-                                  fontSize: Platform.OS === 'web' ? 14 : 13, 
-                                  fontWeight: '700',
-                                  color: urgencyColor,
-                                  marginRight: 8
-                                }]}>
-                                  EMERGENCY BID
-                                </Text>
-                                <Text style={[styles.subtitle, { 
-                                  fontSize: Platform.OS === 'web' ? 16 : 15, 
-                                  fontWeight: '600',
-                                  color: '#10B981'
-                                }]}>
-                                  ${bid.flatFee}
-                                </Text>
-                              </View>
-                              <Text style={[styles.subtitle, { 
-                                fontSize: Platform.OS === 'web' ? 14 : 13, 
-                                fontWeight: '600' 
-                              }]} numberOfLines={1}>
-                                {getLocationDisplay(job?.address || '')} • {bid.cleanerName}
-                              </Text>
-                              <Text style={[styles.muted, { 
-                                fontSize: Platform.OS === 'web' ? 12 : 11, 
-                                marginTop: 2,
+                              <Text style={{
+                                fontSize: 11,
+                                fontWeight: '800',
                                 color: urgencyColor,
-                                fontWeight: '600'
-                              }]}>
+                                letterSpacing: 0.5
+                              }}>
                                 {job?.urgencyLevel?.toUpperCase().replace('-', ' ')} PRIORITY
                               </Text>
-                              {bid.message && (
-                                <Text style={[styles.muted, { 
-                                  fontSize: Platform.OS === 'web' ? 11 : 10, 
-                                  marginTop: 4,
-                                  fontStyle: 'italic'
-                                }]} numberOfLines={2}>
-                                  "{bid.message}"
-                                </Text>
-                              )}
                             </View>
-                            <View style={{ flexDirection: 'row', gap: 8 }}>
-                              <TouchableOpacity
-                                onPress={() => handleAcceptEmergencyBid(bid)}
-                                style={{
-                                  backgroundColor: '#10B981',
-                                  paddingHorizontal: 12,
-                                  paddingVertical: 6,
-                                  borderRadius: 6,
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  gap: 4
-                                }}
-                              >
-                                <Ionicons name="checkmark" size={14} color="white" />
-                                <Text style={{ 
-                                  color: 'white', 
-                                  fontSize: Platform.OS === 'web' ? 12 : 11, 
-                                  fontWeight: '600' 
-                                }}>
-                                  Accept
-                                </Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                onPress={() => handleRejectEmergencyBid(bid)}
-                                style={{
-                                  backgroundColor: '#EF4444',
-                                  paddingHorizontal: 12,
-                                  paddingVertical: 6,
-                                  borderRadius: 6,
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  gap: 4
-                                }}
-                              >
-                                <Ionicons name="close" size={14} color="white" />
-                                <Text style={{ 
-                                  color: 'white', 
-                                  fontSize: Platform.OS === 'web' ? 12 : 11, 
-                                  fontWeight: '600' 
-                                }}>
-                                  Reject
-                                </Text>
-                              </TouchableOpacity>
+                            <View style={{
+                              backgroundColor: '#DCFCE7',
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: '#10B981'
+                            }}>
+                              <Text style={{
+                                fontSize: 16,
+                                fontWeight: '800',
+                                color: '#065F46'
+                              }}>
+                                ${bid.flatFee}
+                              </Text>
                             </View>
+                          </View>
+
+                          {/* Cleaner Info */}
+                          <View style={{ marginBottom: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                              <Ionicons name="person" size={16} color="#64748B" style={{ marginRight: 6 }} />
+                              <Text style={{ fontSize: 15, fontWeight: '700', color: '#0F172A' }}>
+                                {bid.cleanerName}
+                              </Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Ionicons name="location" size={16} color="#64748B" style={{ marginRight: 6 }} />
+                              <Text style={{ fontSize: 14, color: '#64748B' }}>
+                                {getLocationDisplay(job?.address || '')}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Message */}
+                          {bid.message && (
+                            <View style={{
+                              backgroundColor: '#F8FAFC',
+                              padding: 12,
+                              borderRadius: 8,
+                              marginBottom: 12,
+                              borderLeftWidth: 3,
+                              borderLeftColor: '#CBD5E1'
+                            }}>
+                              <Text style={{ fontSize: 13, color: '#475569', fontStyle: 'italic', lineHeight: 20 }}>
+                                "{bid.message}"
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Action Buttons */}
+                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity
+                              onPress={() => handleAcceptEmergencyBid(bid)}
+                              style={{
+                                flex: 1,
+                                backgroundColor: '#10B981',
+                                paddingVertical: 12,
+                                borderRadius: 8,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 6,
+                                shadowColor: '#10B981',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.2,
+                                shadowRadius: 3,
+                                elevation: 2
+                              }}
+                            >
+                              <Ionicons name="checkmark-circle" size={18} color="white" />
+                              <Text style={{
+                                color: 'white',
+                                fontSize: 14,
+                                fontWeight: '700'
+                              }}>
+                                Accept Bid
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => handleRejectEmergencyBid(bid)}
+                              style={{
+                                flex: 1,
+                                backgroundColor: '#EF4444',
+                                paddingVertical: 12,
+                                borderRadius: 8,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 6,
+                                shadowColor: '#EF4444',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.2,
+                                shadowRadius: 3,
+                                elevation: 2
+                              }}
+                            >
+                              <Ionicons name="close-circle" size={18} color="white" />
+                              <Text style={{
+                                color: 'white',
+                                fontSize: 14,
+                                fontWeight: '700'
+                              }}>
+                                Reject
+                              </Text>
+                            </TouchableOpacity>
                           </View>
                         </View>
                       );
@@ -2207,7 +2310,7 @@ function HostHomeScreen({ navigation }: any) {
               (j.status === 'open' || j.status === 'scheduled' || j.status === 'pending' || j.status === 'bidding' || j.status === 'assigned' || j.status === 'in_progress')
             );
             
-            return (upcomingCleaningJobs.length > 0 || myActiveJobs.length > 0) && (
+            return (upcomingCleaningJobs.length > 0 || myActiveJobs.length > 0 || emergencyBidsCount > 0) && (
             <View style={{ marginBottom: 20 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <Text style={[styles.title, { fontSize: 20 }]}>Next Services</Text>
@@ -2221,10 +2324,83 @@ function HostHomeScreen({ navigation }: any) {
                   }}
                 >
                   <Text style={{ fontSize: 12, color: '#1E88E5', fontWeight: '600' }}>
-                    {upcomingCleaningJobs.length + myActiveJobs.length} upcoming
+                    {upcomingCleaningJobs.length + myActiveJobs.length + emergencyBidsCount} upcoming
                   </Text>
                 </TouchableOpacity>
               </View>
+
+            {/* Emergency Bids Alert - Show at top when there are pending bids */}
+            {emergencyBidsCount > 0 && (
+              <TouchableOpacity
+                onPress={() => navigation.navigate('SearchCleaners')}
+                style={[styles.card, {
+                  backgroundColor: '#FEF2F2',
+                  borderWidth: 2,
+                  borderColor: '#FEE2E2',
+                  marginBottom: 16,
+                  shadowColor: '#DC2626',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 4,
+                  elevation: 3,
+                  position: 'relative'
+                }]}
+                activeOpacity={0.8}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 40 }}>
+                  <View style={{
+                    backgroundColor: '#DC2626',
+                    borderRadius: 20,
+                    padding: 8,
+                    marginRight: 12
+                  }}>
+                    <Ionicons name="warning" size={24} color="white" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.subtitle, { fontSize: 16, fontWeight: '700', color: '#DC2626', marginBottom: 2 }]}>
+                      Emergency Cleaning Bids
+                    </Text>
+                    <Text style={[styles.muted, { fontSize: 13, color: '#991B1B', fontWeight: '600' }]}>
+                      {emergencyBidsCount} urgent {emergencyBidsCount === 1 ? 'bid' : 'bids'} awaiting your response
+                    </Text>
+                  </View>
+                </View>
+                <View style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  backgroundColor: '#DC2626',
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 12,
+                  minWidth: 28,
+                  alignItems: 'center',
+                  shadowColor: '#DC2626',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 3,
+                  elevation: 2,
+                }}>
+                  <Text style={{ color: 'white', fontSize: 9, fontWeight: '800' }}>
+                    {emergencyBidsCount}
+                  </Text>
+                </View>
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTopWidth: 1,
+                  borderTopColor: '#FEE2E2',
+                }}>
+                  <Ionicons name="time-outline" size={14} color="#DC2626" style={{ marginRight: 6 }} />
+                  <Text style={{ fontSize: 12, color: '#991B1B', fontWeight: '600' }}>
+                    Tap to review and respond to emergency cleaning requests
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" style={{ marginLeft: 'auto' }} />
+                </View>
+              </TouchableOpacity>
+            )}
             
             {/* Show upcoming trash services first */}
             {myActiveJobs.slice(0, 2).map(job => (

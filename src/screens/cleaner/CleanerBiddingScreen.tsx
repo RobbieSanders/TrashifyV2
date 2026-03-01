@@ -1241,12 +1241,12 @@ export function CleanerBiddingScreen({ navigation }: any) {
             <Text style={styles.sectionTitle}>Pending Bids</Text>
             <View style={styles.pendingBadge}>
               <Text style={styles.pendingBadgeText}>
-                {myBids.filter(bid => bid.status === 'pending').length + myEmergencyBids.filter(bid => bid.status === 'pending').length} PENDING
+                {myBids.filter(bid => bid.status === 'pending' || bid.status === 'revision_requested').length + myEmergencyBids.filter(bid => bid.status === 'pending' || bid.status === 'revision_requested').length} PENDING
               </Text>
             </View>
           </View>
           
-          {myBids.filter(bid => bid.status === 'pending').length === 0 && myEmergencyBids.filter(bid => bid.status === 'pending').length === 0 ? (
+          {myBids.filter(bid => bid.status === 'pending' || bid.status === 'revision_requested').length === 0 && myEmergencyBids.filter(bid => bid.status === 'pending' || bid.status === 'revision_requested').length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="time-outline" size={48} color="#CBD5E1" />
               <Text style={styles.emptyStateTitle}>No Pending Bids</Text>
@@ -2840,17 +2840,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  // Emergency cleaning styles
+  // Emergency cleaning styles - IMPROVED
   emergencyHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
-    backgroundColor: '#FEF2F2',
-    padding: 12,
+    marginBottom: 20,
+    backgroundColor: 'white',
+    padding: 16,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: '#FEE2E2',
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   emergencyHeaderLeft: {
     flexDirection: 'row',
@@ -2864,26 +2869,27 @@ const styles = StyleSheet.create({
   },
   emergencyBadge: {
     backgroundColor: '#DC2626',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 8,
   },
   emergencyBadgeText: {
     color: 'white',
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   emergencyCard: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: 'white',
     borderRadius: 16,
-    padding: 16,
+    padding: 20,
     marginBottom: 16,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#FEE2E2',
     shadowColor: '#DC2626',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
     elevation: 8,
     position: 'relative',
   },
@@ -2897,15 +2903,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   emergencyCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
+    flexDirection: 'column',
+    marginBottom: 16,
   },
   emergencyCardLeft: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    flex: 1,
+    alignItems: 'center',
+    marginBottom: 12,
   },
   emergencyIcon: {
     width: 44,
@@ -2926,10 +2930,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   emergencyAddress: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: '800',
     color: '#0F172A',
-    marginBottom: 4,
+    marginBottom: 8,
+    lineHeight: 30,
   },
   emergencyUrgency: {
     fontSize: 12,

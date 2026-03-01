@@ -57,10 +57,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       console.log('[authStore] Starting sign up with role:', role);
       const profile = await signUpWithEmail(email, password, firstName, lastName, role);
+      
+      // Verify the role was set correctly
+      if (profile.role !== role) {
+        console.error('[authStore] Role mismatch! Expected:', role, 'Got:', profile.role);
+        // Force update the role
+        await updateUserProfile(profile.uid, { role });
+        profile.role = role;
+      }
+      
       // Ensure the profile is fully set before updating loading state
       set({ user: profile, firebaseUser: getCurrentUser(), loading: false, error: null });
-      console.log('[authStore] Sign up successful, profile:', profile);
-      // Don't rely on auth state listener for immediate update
+      console.log('[authStore] Sign up successful, profile with role:', profile.role);
       return;
     } catch (error: any) {
       console.error('[authStore] Sign up failed:', error);
@@ -154,16 +162,15 @@ export function initializeAuthListener() {
         try {
           const profile = await getUserProfile(firebaseUser.uid);
           if (profile) {
-            console.log('[authStore] Loaded user profile:', profile);
+            console.log('[authStore] Loaded user profile with role:', profile.role);
             setUser(profile);
           } else {
-            // Profile doesn't exist yet - this shouldn't happen as signUp creates it
-            // But if it does, create it now
-            console.warn('[authStore] User profile not found, creating for:', firebaseUser.uid);
-            const newProfile = await createUserProfile(firebaseUser, {
-              role: 'host' // Default to host if not specified
-            });
-            setUser(newProfile);
+            // Profile doesn't exist yet - this happens during signup
+            // The signup process will create the profile and set it directly
+            // Don't create any profile here to avoid race conditions
+            console.log('[authStore] User profile not found yet for:', firebaseUser.uid, '- signup process will handle it');
+            // Keep loading state so UI knows to wait
+            // The signUp function will set the user directly once profile is created
           }
         } catch (error) {
           console.error('[authStore] Error loading user profile:', error);
